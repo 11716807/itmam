@@ -13,6 +13,8 @@ FROM node:20-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=8080
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev
 COPY --from=builder /app/dist ./dist
 COPY server.mjs ./server.mjs
 EXPOSE 8080

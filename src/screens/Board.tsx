@@ -23,6 +23,7 @@ type Props = {
   riskWeights: RiskWeights;
   onOpen: (caseId: string) => void;
   onReset: () => void;
+  onLoadDemo: () => void;
   onPrepareStart: () => void;
   onPrepareCase: (care: CareCase, source: string) => void;
   onPrepareDone: (placed: number, skipped: number) => void;
@@ -35,6 +36,7 @@ export function Board({
   riskWeights,
   onOpen,
   onReset,
+  onLoadDemo,
   onPrepareStart,
   onPrepareCase,
   onPrepareDone,
@@ -172,8 +174,8 @@ export function Board({
           <h2>Close every actionable result</h2>
           {firstImport && !preparing ? (
             <p className="lede">
-              Import a screening extract. Extra metric columns are enriched into urgency, specialty,
-              and SLA — then only actionable loops land on this board.
+              Board and audit sync to the cloud. Restore the demo board for judges, or import a fresh
+              extract — only actionable loops land here.
             </p>
           ) : null}
         </div>
@@ -265,14 +267,17 @@ export function Board({
             </p>
             {error ? <p className="import-error">{error}</p> : null}
             <div className="import-hero-actions">
+              <button type="button" className="btn primary" onClick={onLoadDemo}>
+                Restore demo board
+              </button>
               <button
                 type="button"
-                className="btn primary"
+                className="btn"
                 onClick={() => fileRef.current?.click()}
               >
                 Import CSV
               </button>
-              <button type="button" className="btn" onClick={() => void onSample()}>
+              <button type="button" className="btn ghost" onClick={() => void onSample()}>
                 Use example extract
               </button>
               <a className="btn ghost" href="/sample-ifhas-extract.csv" download>

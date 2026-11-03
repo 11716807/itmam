@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Toast, type ToastItem } from "./components/Toast";
 import { Board } from "./screens/Board";
 import { CaseView } from "./screens/CaseView";
@@ -8,13 +8,21 @@ import { Outcomes } from "./screens/Outcomes";
 import { PatientView } from "./screens/PatientView";
 import { initialRiskWeights, RiskRules } from "./screens/RiskRules";
 import {
+  applyRemoteState,
   loadState,
   resetState,
   saveState,
   snapshotRegistry,
+  stamp,
   type Persisted,
 } from "./store";
-import type { RiskWeights } from "./lib/riskWeights";
+import { buildDemoState } from "./lib/demoBoard";
+import {
+  clearCloudBoard,
+  pullCloudBoard,
+  pushCloudBoard,
+} from "./lib/cloudState";
+import { saveRiskWeights, type RiskWeights } from "./lib/riskWeights";
 import type { AppScreen, AuditEvent, CareCase, Message } from "./types";
 
 const TOAST_COPY: Record<string, { title: string; detail: string; tone: ToastItem["tone"] }> = {
@@ -81,10 +89,67 @@ export default function App() {
   const [toast, setToast] = useState<ToastItem | null>(null);
   const [preparing, setPreparing] = useState(false);
   const [riskWeights, setRiskWeights] = useState<RiskWeights>(() => initialRiskWeights());
+  const [cloudReady, setCloudReady] = useState(false);
+  const skipPush = useRef(true);
+  const riskRef = useRef(riskWeights);
+  riskRef.current = riskWeights;
+
+  // Pull shared board/audit from Cloud Run (Firestore) so judges see the same data.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const local = loadState();
+      const remote = await pullCloudBoard();
+      if (cancelled) return;
+
+      if (remote?.state) {
+        const remoteAt = remote.savedAt || remote.state.savedAt || "";
+        const localAt = local.savedAt || "";
+        const preferRemote =
+          !local.cases.length ||
+          remote.state.cases.length > local.cases.length ||
+          remoteAt >= localAt;
+        if (preferRemote) {
+          setState(applyRemoteState(remote.state));
+          if (remote.riskWeights) {
+            saveRiskWeights(remote.riskWeights);
+            setRiskWeights(remote.riskWeights);
+          }
+        } else {
+          await pushCloudBoard(local, riskRef.current);
+        }
+      } else if (local.cases.length) {
+        await pushCloudBoard(local, riskRef.current);
+      } else {
+        const demo = buildDemoState();
+        setState(demo);
+        await pushCloudBoard(demo, riskRef.current);
+      }
+
+      skipPush.current = false;
+      setCloudReady(true);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     saveState(state);
+    if (skipPush.current) return;
+    const timer = window.setTimeout(() => {
+      void pushCloudBoard(state, riskRef.current);
+    }, 450);
+    return () => window.clearTimeout(timer);
   }, [state]);
+
+  useEffect(() => {
+    if (skipPush.current || !cloudReady) return;
+    const timer = window.setTimeout(() => {
+      void pushCloudBoard(state, riskWeights);
+    }, 450);
+    return () => window.clearTimeout(timer);
+  }, [riskWeights, cloudReady, state]);
 
   const dismissToast = useCallback(() => setToast(null), []);
 
@@ -107,19 +172,35 @@ export default function App() {
   }
 
   function patchCase(next: CareCase, events: AuditEvent[], message?: Message) {
-    setState((current) => ({
-      ...current,
-      cases: current.cases.map((c) => (c.id === next.id ? next : c)),
-      audit: [...current.audit, ...events],
-      messages: message ? [...current.messages, message] : current.messages,
-      selectedCaseId: next.id,
-    }));
+    setState((current) =>
+      stamp({
+        ...current,
+        cases: current.cases.map((c) => (c.id === next.id ? next : c)),
+        audit: [...current.audit, ...events],
+        messages: message ? [...current.messages, message] : current.messages,
+        selectedCaseId: next.id,
+      }),
+    );
     showFromEvents(events);
   }
 
   function openCase(id: string) {
-    setState((current) => ({ ...current, selectedCaseId: id }));
+    setState((current) => stamp({ ...current, selectedCaseId: id }));
     setScreen("case");
+  }
+
+  function loadDemoBoard() {
+    setPreparing(false);
+    const demo = buildDemoState();
+    setState(demo);
+    void pushCloudBoard(demo, riskRef.current);
+    setScreen("board");
+    setToast({
+      id: `demo-${Date.now()}`,
+      title: "Demo board ready",
+      detail: "Sample IFHAS extract loaded with audit trail — no CSV needed.",
+      tone: "ok",
+    });
   }
 
   const openCount = state.cases.filter(
@@ -152,7 +233,11 @@ export default function App() {
         <div className="sidebar-foot">
           <p className="side-meta">
             <span className="live-dot" aria-hidden />
-            {preparing ? "Working on your file…" : `${openCount} open loops`}
+            {preparing
+              ? "Working on your file…"
+              : cloudReady
+                ? `${openCount} open loops · synced`
+                : `${openCount} open loops`}
           </p>
           <p className="side-note">IFHAS / EAS · tell · own · book · see · verify</p>
         </div>
@@ -167,45 +252,51 @@ export default function App() {
               preparing={preparing}
               riskWeights={riskWeights}
               onOpen={openCase}
+              onLoadDemo={loadDemoBoard}
               onReset={() => {
                 setPreparing(false);
-                setState(resetState());
+                void clearCloudBoard();
+                setState(stamp(resetState()));
                 setScreen("board");
                 setToast({
                   id: `reset-${Date.now()}`,
                   title: "Board cleared",
-                  detail: "Import an extract — rows will be enriched onto the board.",
+                  detail: "Import an extract, or restore the demo board.",
                   tone: "info",
                 });
               }}
               onPrepareStart={() => {
                 setPreparing(true);
-                setState({
-                  ...resetState(),
-                  importSource: null,
-                });
+                setState(
+                  stamp({
+                    ...resetState(),
+                    importSource: null,
+                  }),
+                );
               }}
               onPrepareCase={(care, source) => {
                 const snap = snapshotRegistry();
-                setState((current) => ({
-                  ...current,
-                  importSource: source,
-                  patients: snap.patients,
-                  results: snap.results,
-                  cases: [...current.cases.filter((c) => c.id !== care.id), care],
-                  selectedCaseId: current.selectedCaseId || care.id,
-                audit: [
-                  ...current.audit,
-                  {
-                    id: `aud-import-${care.id}-${Date.now()}`,
-                    caseId: care.id,
-                    at: new Date().toISOString().slice(0, 16),
-                    actor: "system",
-                    action: "imported",
-                    detail: care.aiPriorityReason || "Enriched from import extract",
-                  },
-                ],
-                }));
+                setState((current) =>
+                  stamp({
+                    ...current,
+                    importSource: source,
+                    patients: snap.patients,
+                    results: snap.results,
+                    cases: [...current.cases.filter((c) => c.id !== care.id), care],
+                    selectedCaseId: current.selectedCaseId || care.id,
+                    audit: [
+                      ...current.audit,
+                      {
+                        id: `aud-import-${care.id}-${Date.now()}`,
+                        caseId: care.id,
+                        at: new Date().toISOString().slice(0, 16),
+                        actor: "system",
+                        action: "imported",
+                        detail: care.aiPriorityReason || "Enriched from import extract",
+                      },
+                    ],
+                  }),
+                );
               }}
               onPrepareDone={(placed, skipped) => {
                 setPreparing(false);
@@ -235,7 +326,7 @@ export default function App() {
             <section className="panel">
               <div className="panel-body empty-board">
                 <p>No case selected.</p>
-                <p className="muted">Import an extract on the board first.</p>
+                <p className="muted">Open a case from the board, or restore the demo board.</p>
                 <button type="button" className="btn" onClick={() => setScreen("board")}>
                   Go to board
                 </button>
@@ -249,10 +340,10 @@ export default function App() {
               selectedId={selected?.id ?? null}
               messages={state.messages}
               onSelect={(id) => {
-                setState((current) => ({ ...current, selectedCaseId: id }));
+                setState((current) => stamp({ ...current, selectedCaseId: id }));
               }}
               onClearSelect={() => {
-                setState((current) => ({ ...current, selectedCaseId: "" }));
+                setState((current) => stamp({ ...current, selectedCaseId: "" }));
               }}
               onPatch={patchCase}
               onOpenCase={() => setScreen("case")}
@@ -264,10 +355,10 @@ export default function App() {
               cases={state.cases}
               selectedId={selected?.id ?? null}
               onSelect={(id) => {
-                setState((current) => ({ ...current, selectedCaseId: id }));
+                setState((current) => stamp({ ...current, selectedCaseId: id }));
               }}
               onClearSelect={() => {
-                setState((current) => ({ ...current, selectedCaseId: "" }));
+                setState((current) => stamp({ ...current, selectedCaseId: "" }));
               }}
               onPatch={patchCase}
               onOpenCase={() => setScreen("case")}
@@ -281,7 +372,7 @@ export default function App() {
               cases={state.cases}
               audit={state.audit}
               onOpenCase={(id) => {
-                setState((current) => ({ ...current, selectedCaseId: id }));
+                setState((current) => stamp({ ...current, selectedCaseId: id }));
                 setScreen("case");
               }}
             />

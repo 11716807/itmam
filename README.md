@@ -44,6 +44,9 @@ Health: `GET /api/health`
 
 | Piece | Role |
 |---|---|
-| Cloud Run | Hosts Vite build + `/api/itmam*` |
+| Cloud Run | Hosts Vite build + `/api/itmam*` + `/api/state` |
+| Firestore | Shared board, cases, messages, audit (judges see the same data) |
 | Gemini | Brief / prepare / translate (key from env) |
 | Local enrichment | Works without Gemini (demo-safe fallback) |
+
+First visit seeds a **demo IFHAS board** automatically. Every loop action appends to the audit trail and syncs to Firestore + localStorage. Use **Clear board** then **Restore demo board** if you need a clean judge walkthrough.

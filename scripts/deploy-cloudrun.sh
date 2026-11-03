@@ -33,12 +33,17 @@ echo "Region:   ${REGION}"
 echo "Service:  ${SERVICE}"
 echo "Model:    ${GEMINI_MODEL}"
 echo "Gemini key: from .env.local only (${#GEMINI_API_KEY} chars)"
+echo "Store:    Firestore (shared board + audit)"
 
 gcloud services enable \
   run.googleapis.com \
   cloudbuild.googleapis.com \
   artifactregistry.googleapis.com \
+  firestore.googleapis.com \
   --project="${PROJECT_ID}"
+
+# Native mode DB if none exists yet (ignore if already created).
+gcloud firestore databases create --location="${REGION}" --project="${PROJECT_ID}" 2>/dev/null || true
 
 gcloud run deploy "${SERVICE}" \
   --source . \
@@ -52,8 +57,9 @@ gcloud run deploy "${SERVICE}" \
   --min-instances=0 \
   --max-instances=3 \
   --quiet \
-  --set-env-vars="GEMINI_API_KEY=${GEMINI_API_KEY},GEMINI_MODEL=${GEMINI_MODEL}"
+  --set-env-vars="GEMINI_API_KEY=${GEMINI_API_KEY},GEMINI_MODEL=${GEMINI_MODEL},GCP_PROJECT_ID=${PROJECT_ID}"
 
 echo
 echo "Deployed. Open the Service URL from the output above."
 echo "Health:  GET /api/health"
+echo "State:   GET /api/state"

@@ -1,5 +1,10 @@
+import { mkdirSync, readFileSync, unlinkSync, writeFileSync, existsSync } from "node:fs";
+import { join } from "node:path";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Connect, Plugin } from "vite";
+
+const STATE_DIR = join(process.cwd(), ".data");
+const STATE_FILE = join(STATE_DIR, "board.json");
 
 const BRIEF_PROMPT = `You are Itmam, a closed-loop screening-to-care assistant for Abu Dhabi IFHAS/EAS follow-up.
 You receive a JSON evidence pack only. Return JSON only:
@@ -84,6 +89,46 @@ export function geminiPlugin(apiKey: string, model: string): Plugin {
     (name, index, all) => name && all.indexOf(name) === index,
   );
 
+  const handleState: Connect.NextHandleFunction = async (req, res, next) => {
+    const path = req.url?.split("?")[0];
+    if (path !== "/api/state") {
+      next();
+      return;
+    }
+    try {
+      if (req.method === "GET") {
+        if (!existsSync(STATE_FILE)) {
+          send(res, 200, { envelope: null });
+          return;
+        }
+        const envelope = JSON.parse(readFileSync(STATE_FILE, "utf8"));
+        send(res, 200, { envelope });
+        return;
+      }
+      if (req.method === "PUT") {
+        const body = JSON.parse(await readBody(req)) as { envelope?: unknown };
+        if (!body.envelope) {
+          send(res, 400, { error: "Missing envelope" });
+          return;
+        }
+        mkdirSync(STATE_DIR, { recursive: true });
+        writeFileSync(STATE_FILE, JSON.stringify(body.envelope), "utf8");
+        send(res, 200, { ok: true });
+        return;
+      }
+      if (req.method === "DELETE") {
+        if (existsSync(STATE_FILE)) unlinkSync(STATE_FILE);
+        send(res, 200, { ok: true });
+        return;
+      }
+      send(res, 405, { error: "GET, PUT, or DELETE" });
+    } catch (error) {
+      send(res, 500, {
+        error: error instanceof Error ? error.message : "State store failed",
+      });
+    }
+  };
+
   const handle: Connect.NextHandleFunction = async (req, res, next) => {
     const path = req.url?.split("?")[0];
     if (path !== "/api/itmam" && path !== "/api/itmam-prepare" && path !== "/api/itmam-translate") {
@@ -139,9 +184,11 @@ export function geminiPlugin(apiKey: string, model: string): Plugin {
   return {
     name: "itmam-gemini",
     configureServer(server) {
+      server.middlewares.use(handleState);
       server.middlewares.use(handle);
     },
     configurePreviewServer(server) {
+      server.middlewares.use(handleState);
       server.middlewares.use(handle);
     },
   };
