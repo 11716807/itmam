@@ -4,6 +4,8 @@ Closes the **IFHAS/EAS** screening-to-care loop for Abu Dhabi: every actionable 
 
 Deploy pattern mirrors **[google-hackathon / Golden Frame](https://github.com/11716807/hackathon)** — Cloud Run + `GEMINI_API_KEY` from `.env.local`.
 
+**Live demo:** https://itmam-216812516383.asia-south1.run.app
+
 ---
 
 ## Local
