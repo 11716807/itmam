@@ -1,0 +1,11 @@
+patient_id,name_en,name_ar,age,sex,lang,insurance_plan,network,program,code,value,recorded_at,facility,days_waiting,prior_no_shows,wearable_flag,family_risk,notes
+p-yusuf,Yusuf Rahman,يوسف رحمن,58,M,en,Daman Basic,network_b,EAS,fit,Positive,2026-10-18,EAS — Al Dhafra,12,1,no,yes,Cancer-path FIT; prior no-show
+p-fatima,Fatima Al Ketbi,فاطمة الكتبي,51,F,en,Thiqa Family,network_a,IFHAS,bp,168/102,2026-10-08,IFHAS — Al Ain,22,0,yes,no,Wearable high resting BP 22 days waiting
+p-mariam,Mariam Al Hashimi,مريم الهاشمي,44,F,en,Thiqa Family,network_a,IFHAS,hba1c,7.4,2026-10-12,IFHAS — Mussafah Center,18,0,no,no,No owner after extract
+p-noura,Noura Al Suwaidi,نورة السويدي,62,F,en,Thiqa Family,network_a,IFHAS,moca,22,2026-10-15,IFHAS — Al Bahia,15,0,no,yes,Brain-health screen; family risk
+p-ahmed,Ahmed Al Mazrouei,أحمد المزروعي,39,M,en,ADNIC Care,network_a,EAS,ldl,4.9,2026-10-22,EAS — Abu Dhabi Gate,8,0,no,yes,Family CVD history
+p-khalid,Khalid Al Nuaimi,خالد النعيمي,47,M,en,Daman Enhanced,network_c,EAS,bmi,33.1,2026-10-05,EAS — ICAD,25,2,yes,no,Two prior no-shows; wearable low activity
+p-hassan,Hassan Al Blooshi,حسن البلوشي,55,M,en,Daman Basic,network_b,IFHAS,hba1c,6.6,2026-10-25,IFHAS — Baniyas,5,0,yes,no,Recent result; wearable glucose reminder
+p-layla,Layla Al Qubaisi,ليلى القبيسي,41,F,en,Thiqa Family,network_a,IFHAS,vision,Failed,2026-10-20,IFHAS — Khalifa City,9,0,no,no,Vision screen failed referral
+p-omar,Omar Al Dhaheri,عمر الظاهري,36,M,en,ADNIC Care,network_a,EAS,bp,138/88,2026-10-27,EAS — Al Reem,3,0,no,no,Isolated BP 138/88
+p-sara,Sara Al Mansoori,سارة المنصوري,33,F,en,Thiqa Family,network_a,EAS,ldl,3.1,2026-10-28,EAS — Reem,2,0,no,no,Isolated LDL 3.1
