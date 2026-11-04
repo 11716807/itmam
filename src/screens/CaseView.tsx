@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { AgentGraph, AgentGraphStrip } from "../components/AgentGraph";
 import { CareTimeline } from "../components/CareTimeline";
 import { CaseAsk } from "../components/CaseAsk";
+import type { AgentRun } from "../lib/agents/types";
 import {
   clinicianById,
   patientById,
@@ -37,6 +39,7 @@ type Props = {
   care: CareCase;
   messages: Message[];
   audit: AuditEvent[];
+  agentRun?: AgentRun | null;
   onPatch: (next: CareCase, events: AuditEvent[], message?: Message) => void;
   onPatient: () => void;
   onClinician: () => void;
@@ -70,6 +73,7 @@ export function CaseView(props: Props) {
   const [referralSlotId, setReferralSlotId] = useState(props.care.referral?.slotId ?? "");
   const [confirmNote, setConfirmNote] = useState(props.care.referral?.note ?? "");
   const [showLost, setShowLost] = useState(false);
+  const [showAgentGraph, setShowAgentGraph] = useState(false);
   const [showReschedule, setShowReschedule] = useState(false);
   const [draft, setDraft] = useState("");
   const [composeLang, setComposeLang] = useState<string>("en");
@@ -351,6 +355,16 @@ export function CaseView(props: Props) {
 
         <div className="case-layout">
           <CareTimeline care={props.care} />
+
+          {props.agentRun ? (
+            <div className="case-agent-block">
+              <AgentGraphStrip
+                run={props.agentRun}
+                onOpen={() => setShowAgentGraph((v) => !v)}
+              />
+              {showAgentGraph ? <AgentGraph run={props.agentRun} compact /> : null}
+            </div>
+          ) : null}
 
           <div className="split">
           <div className="block">

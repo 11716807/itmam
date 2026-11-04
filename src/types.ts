@@ -143,6 +143,8 @@ export type CareCase = {
   noShowCount?: number;
   /** Post-visit metro fork: direct close vs confirmatory referral. */
   referral?: ReferralState;
+  /** Link back to the agent pipeline run that placed this case. */
+  agentRunId?: string | null;
 };
 
 export type AppScreen =

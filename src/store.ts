@@ -6,6 +6,7 @@ import {
   upsertPatient,
   upsertResult,
 } from "./lib/registry";
+import type { AgentRun } from "./lib/agents/types";
 import type { AuditEvent, CareCase, Message, Patient, ScreeningResult } from "./types";
 
 const KEY = "itmam-v3";
@@ -23,6 +24,8 @@ export type Persisted = {
   importSource: string | null;
   patients: Patient[];
   results: ScreeningResult[];
+  /** Visible agent pipeline runs (placed + filtered + needs_fix). */
+  agentRuns: AgentRun[];
 };
 
 function collectPatients(cases: CareCase[]): Patient[] {
@@ -46,6 +49,7 @@ export function emptyState(): Persisted {
     importSource: null,
     patients: [],
     results: [],
+    agentRuns: [],
   };
 }
 
@@ -85,6 +89,9 @@ function normalize(parsed: Record<string, unknown>): Persisted | null {
       typeof parsed.importSource === "string" ? parsed.importSource : null,
     patients,
     results,
+    agentRuns: Array.isArray(parsed.agentRuns)
+      ? (parsed.agentRuns as AgentRun[])
+      : [],
   };
 }
 

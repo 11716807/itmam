@@ -1,8 +1,14 @@
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
+import { AgentGraph } from "../components/AgentGraph";
 import { patientById, resultById } from "../data/seed";
+import {
+  type AgentEditablePatch,
+  type AgentRun,
+  rerunAgentWithPatch,
+  streamAgentPipeline,
+} from "../lib/agents";
 import { parseImportCsv, SAMPLE_IMPORT_CSV, type ImportRow } from "../lib/importCsv";
 import { hoursOpen, isOpen, slaBreached } from "../lib/loop";
-import { streamPrepareBoard, type PrepareEvent } from "../lib/prepareBoard";
 import { rankCases } from "../lib/priority";
 import { resetRegistry, upsertPatient, upsertResult } from "../lib/registry";
 import { planSlaRecovery } from "../lib/slaAction";
@@ -10,14 +16,9 @@ import type { RiskWeights } from "../lib/riskWeights";
 import type { CareCase, ScreeningResult } from "../types";
 import { STAGE_LABEL } from "../types";
 
-type StreamLine = {
-  id: string;
-  tone: "info" | "ok" | "skip" | "warn";
-  text: string;
-};
-
 type Props = {
   cases: CareCase[];
+  agentRuns: AgentRun[];
   importSource: string | null;
   preparing: boolean;
   riskWeights: RiskWeights;
@@ -25,12 +26,14 @@ type Props = {
   onReset: () => void;
   onLoadDemo: () => void;
   onPrepareStart: () => void;
-  onPrepareCase: (care: CareCase, source: string) => void;
-  onPrepareDone: (placed: number, skipped: number) => void;
+  onAgentRun: (run: AgentRun, care: CareCase | null, source: string) => void;
+  onPrepareDone: (placed: number, filtered: number, needsFix: number) => void;
+  onReplaceAgentRun: (run: AgentRun, care: CareCase | null) => void;
 };
 
 export function Board({
   cases,
+  agentRuns,
   importSource,
   preparing,
   riskWeights,
@@ -38,19 +41,18 @@ export function Board({
   onReset,
   onLoadDemo,
   onPrepareStart,
-  onPrepareCase,
+  onAgentRun,
   onPrepareDone,
+  onReplaceAgentRun,
 }: Props) {
   const fileRef = useRef<HTMLInputElement>(null);
-  const [stream, setStream] = useState<StreamLine[]>([]);
   const [reading, setReading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-
-  function clearStream() {
-    setStream([]);
-    setReading(null);
-    setError(null);
-  }
+  const [liveRun, setLiveRun] = useState<AgentRun | null>(null);
+  const [activeNodeId, setActiveNodeId] = useState<string | null>(null);
+  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
+  const [fixDraft, setFixDraft] = useState<AgentEditablePatch>({});
+  const [rerunning, setRerunning] = useState(false);
 
   const resultsById = Object.fromEntries(
     cases.map((c) => [c.resultId, resultById(c.resultId)]),
@@ -63,18 +65,25 @@ export function Board({
   const urgentOpen = open.filter((c) => c.urgency === "urgent");
   const escalatePool = open.filter((c) => c.urgency === "urgent" || slaBreached(c));
   const ranked = rankCases(cases, resultsById, riskWeights);
-  const top = ranked[0];
+  const top = ranked[0]?.case;
   const hasBoard = cases.length > 0;
-  const firstImport = !hasBoard;
+  const firstImport = !hasBoard && agentRuns.length === 0;
 
-  function pushLine(line: StreamLine) {
-    setStream((prev) => [...prev.slice(-40), line]);
-  }
+  const placedRuns = useMemo(() => agentRuns.filter((r) => r.status === "placed"), [agentRuns]);
+  const filteredRuns = useMemo(() => agentRuns.filter((r) => r.status === "filtered"), [agentRuns]);
+  const needsFixRuns = useMemo(() => agentRuns.filter((r) => r.status === "needs_fix"), [agentRuns]);
+
+  const selectedRun =
+    (selectedRunId && agentRuns.find((r) => r.id === selectedRunId)) ||
+    liveRun ||
+    agentRuns[0] ||
+    null;
 
   async function runPrepare(rows: ImportRow[], source: string) {
     setError(null);
-    setStream([]);
     setReading(null);
+    setLiveRun(null);
+    setActiveNodeId(null);
     onPrepareStart();
     resetRegistry();
     for (const row of rows) {
@@ -83,59 +92,50 @@ export function Board({
     }
 
     try {
-      for await (const event of streamPrepareBoard(rows)) {
-        handleEvent(event, source);
+      for await (const event of streamAgentPipeline(rows, { explain: false })) {
+        if (event.type === "row_start") {
+          setReading(`${event.name} · ${event.finding}`);
+          setLiveRun({
+            id: event.runId,
+            rowKey: "",
+            patientName: event.name,
+            finding: event.finding,
+            status: "needs_fix",
+            nodes: [],
+            careId: null,
+            issues: [],
+            rawRow: rows[event.index - 1],
+            finishedAt: new Date().toISOString(),
+          });
+          setActiveNodeId("ingest");
+        } else if (event.type === "node") {
+          setActiveNodeId(event.node.id);
+          setLiveRun((prev) =>
+            prev && prev.id === event.runId
+              ? {
+                  ...prev,
+                  nodes: [
+                    ...prev.nodes.filter((n) => n.id !== event.node.id),
+                    event.node,
+                  ],
+                }
+              : prev,
+          );
+        } else if (event.type === "row_done") {
+          onAgentRun(event.result.run, event.result.care, source);
+          setLiveRun(event.result.run);
+          setSelectedRunId(event.result.run.id);
+          setActiveNodeId(null);
+        } else if (event.type === "batch_done") {
+          onPrepareDone(event.placed, event.filtered, event.needsFix);
+        }
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Import failed");
-      onPrepareDone(0, 0);
+      setError(err instanceof Error ? err.message : "Agent pipeline failed");
+      onPrepareDone(0, 0, 0);
     } finally {
       setReading(null);
-    }
-  }
-
-  function handleEvent(event: PrepareEvent, source: string) {
-    if (event.type === "start") {
-      pushLine({
-        id: `start-${Date.now()}`,
-        tone: "info",
-        text: `Enriching ${event.total} findings — classifying actionable vs borderline…`,
-      });
-      return;
-    }
-    if (event.type === "reading") {
-      setReading(`${event.name} · ${event.finding}`);
-      pushLine({
-        id: `read-${event.index}`,
-        tone: "info",
-        text: `${event.index}/${event.total} Enriching ${event.name} — ${event.finding}`,
-      });
-      return;
-    }
-    if (event.type === "decided") {
-      if (event.skipped || !event.care) {
-        pushLine({
-          id: `skip-${event.index}`,
-          tone: "skip",
-          text: `Skip ${event.name} (${event.decision.classifiedFlag}): ${event.decision.priorityReason}`,
-        });
-        return;
-      }
-      onPrepareCase(event.care, source);
-      pushLine({
-        id: `place-${event.index}`,
-        tone: "ok",
-        text: `Board ← ${event.name} · ${event.decision.urgency} · ${event.decision.priorityReason}`,
-      });
-      return;
-    }
-    if (event.type === "done") {
-      pushLine({
-        id: `done-${Date.now()}`,
-        tone: event.placed ? "ok" : "warn",
-        text: `Done — ${event.placed} placed, ${event.skipped} skipped.`,
-      });
-      onPrepareDone(event.placed, event.skipped);
+      setActiveNodeId(null);
     }
   }
 
@@ -156,6 +156,40 @@ export function Board({
     await runPrepare(rows, "sample-ifhas-extract.csv");
   }
 
+  function openFix(run: AgentRun) {
+    setSelectedRunId(run.id);
+    setFixDraft({
+      value: run.editablePatch?.value ?? run.rawRow.result.value,
+      name_en: run.editablePatch?.name_en ?? run.rawRow.patient.nameEn,
+      age: run.editablePatch?.age ?? String(run.rawRow.patient.age),
+      days_waiting: run.rawRow.metrics.days_waiting || "",
+      notes: run.rawRow.metrics.notes || "",
+    });
+  }
+
+  async function submitRerun(run: AgentRun) {
+    setRerunning(true);
+    setError(null);
+    try {
+      upsertPatient(run.rawRow.patient);
+      upsertResult(run.rawRow.result);
+      const result = await rerunAgentWithPatch(run, fixDraft);
+      // Ensure registry has patched patient/result
+      upsertPatient(result.run.rawRow.patient);
+      upsertResult(result.run.rawRow.result);
+      onReplaceAgentRun(result.run, result.care);
+      setSelectedRunId(result.run.id);
+      setLiveRun(result.run);
+      if (result.run.status !== "needs_fix") {
+        setFixDraft({});
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Re-run failed");
+    } finally {
+      setRerunning(false);
+    }
+  }
+
   const fileInput = (
     <input
       ref={fileRef}
@@ -168,25 +202,26 @@ export function Board({
 
   return (
     <section className="panel">
-      <header className={`panel-head ${hasBoard ? "panel-head-tight" : ""}`}>
+      <header className={`panel-head ${hasBoard || agentRuns.length ? "panel-head-tight" : ""}`}>
         <div>
           <p className="eyebrow">Care coordination</p>
           <h2>Close every actionable result</h2>
           {firstImport && !preparing ? (
             <p className="lede">
-              Board and audit sync to the cloud. Restore the demo board for judges, or import a fresh
-              extract — only actionable loops land here.
+              Each finding runs a visible agent graph — validate, enrich, gate, prioritize, route.
+              Filtered and bad-data rows stay visible so nothing is silently dropped.
             </p>
           ) : null}
         </div>
-        {hasBoard ? (
+        {hasBoard || agentRuns.length ? (
           <div className="head-actions">
             <button
               type="button"
               className="btn ghost"
               disabled={preparing}
               onClick={() => {
-                clearStream();
+                setLiveRun(null);
+                setSelectedRunId(null);
                 onReset();
               }}
             >
@@ -197,13 +232,14 @@ export function Board({
       </header>
 
       <div className="panel-body">
-        {/* After first import: slim strip at top — not a big dock */}
-        {hasBoard || preparing ? (
+        {hasBoard || preparing || agentRuns.length ? (
           <div className={`import-bar ${preparing ? "busy" : ""}`}>
             {fileInput}
             <div className="import-bar-meta">
-              <span className="eyebrow">Import</span>
-              <strong>{preparing ? "Working on your file…" : importSource || "Extract loaded"}</strong>
+              <span className="eyebrow">Import · agents</span>
+              <strong>
+                {preparing ? "Agents running…" : importSource || "Extract loaded"}
+              </strong>
               {error ? <span className="import-error">{error}</span> : null}
             </div>
             <div className="import-bar-actions">
@@ -215,7 +251,12 @@ export function Board({
               >
                 {preparing ? "Working…" : "Re-import"}
               </button>
-              <button type="button" className="btn ghost" disabled={preparing} onClick={() => void onSample()}>
+              <button
+                type="button"
+                className="btn ghost"
+                disabled={preparing}
+                onClick={() => void onSample()}
+              >
                 Example file
               </button>
             </div>
@@ -223,67 +264,185 @@ export function Board({
         ) : null}
 
         {preparing ? (
-          <>
-            <div className="working-banner" aria-live="polite">
-              <div className="working-spinner" aria-hidden />
-              <div className="working-copy">
-                <strong>Working on your file…</strong>
-                <p>
-                  Reading each finding, enriching metrics, and placing only actionable loops on the
-                  board.
-                </p>
-                {reading ? <p className="working-meta">Now: {reading}</p> : null}
-              </div>
+          <div className="working-banner" aria-live="polite">
+            <div className="working-spinner" aria-hidden />
+            <div className="working-copy">
+              <strong>Agent pipeline…</strong>
+              <p>
+                Ingest → validate → enrich → gate → priority → route. Every decision is recorded on
+                the graph.
+              </p>
+              {reading ? <p className="working-meta">Now: {reading}</p> : null}
             </div>
-            <div className={`stream-panel ${hasBoard ? "stream-panel-mini" : ""}`}>
-              <div className="stream-head">
-                <p className="eyebrow">Enrich stream</p>
-                {reading ? <p className="stream-now">{reading}</p> : null}
-              </div>
-              {stream.length ? (
-                <ol className="stream-log">
-                  {(hasBoard ? stream.slice(-4) : stream).map((line) => (
-                    <li key={line.id} className={`stream-line ${line.tone}`}>
-                      {line.text}
-                    </li>
-                  ))}
-                </ol>
-              ) : null}
-              <div className="stream-pulse" aria-hidden />
-            </div>
-          </>
+          </div>
         ) : null}
 
-        {/* First visit: large import hero only */}
+        {liveRun || (preparing && selectedRun) ? (
+          <div className="agent-live-panel">
+            <AgentGraph
+              run={liveRun || selectedRun!}
+              activeNodeId={activeNodeId}
+              compact
+            />
+          </div>
+        ) : null}
+
         {firstImport && !preparing ? (
           <div className="import-hero">
             {fileInput}
             <p className="eyebrow">First step</p>
-            <h3>Import screening data</h3>
+            <h3>Run the agent pipeline on a screening extract</h3>
             <p>
-              Drop an IFHAS/EAS CSV — or any extract with patient + finding columns. Extra metrics
-              like <code>days_waiting</code> and <code>wearable_flag</code> enrich each row before
-              it hits the board.
+              Agents classify actionable vs borderline, tag bad data for fix-and-re-run, and keep
+              filtered rows visible. Extra metrics like <code>days_waiting</code> feed priority.
             </p>
             {error ? <p className="import-error">{error}</p> : null}
             <div className="import-hero-actions">
               <button type="button" className="btn primary" onClick={onLoadDemo}>
                 Restore demo board
               </button>
-              <button
-                type="button"
-                className="btn"
-                onClick={() => fileRef.current?.click()}
-              >
+              <button type="button" className="btn" onClick={() => fileRef.current?.click()}>
                 Import CSV
               </button>
               <button type="button" className="btn ghost" onClick={() => void onSample()}>
                 Use example extract
               </button>
-              <a className="btn ghost" href="/sample-ifhas-extract.csv" download>
-                Download example
-              </a>
             </div>
+          </div>
+        ) : null}
+
+        {agentRuns.length && !preparing ? (
+          <div className="agent-trays">
+            <div className="agent-tray">
+              <header>
+                <p className="eyebrow">Placed</p>
+                <strong>{placedRuns.length}</strong>
+              </header>
+              <ul>
+                {placedRuns.map((run) => (
+                  <li key={run.id}>
+                    <button type="button" className="agent-tray-row" onClick={() => setSelectedRunId(run.id)}>
+                      <span>
+                        <strong>{run.patientName}</strong>
+                        <em>{run.finding}</em>
+                      </span>
+                      <span className={`chip ${run.urgency || "routine"}`}>{run.urgency}</span>
+                    </button>
+                    {run.careId ? (
+                      <button type="button" className="text-link" onClick={() => onOpen(run.careId!)}>
+                        Open case →
+                      </button>
+                    ) : null}
+                  </li>
+                ))}
+                {!placedRuns.length ? <li className="muted">None placed yet</li> : null}
+              </ul>
+            </div>
+
+            <div className="agent-tray filtered">
+              <header>
+                <p className="eyebrow">Filtered / low priority</p>
+                <strong>{filteredRuns.length}</strong>
+              </header>
+              <ul>
+                {filteredRuns.map((run) => (
+                  <li key={run.id}>
+                    <button type="button" className="agent-tray-row" onClick={() => setSelectedRunId(run.id)}>
+                      <span>
+                        <strong>{run.patientName}</strong>
+                        <em>{run.gateReason || run.priorityReason}</em>
+                      </span>
+                      <span className="chip">{run.classifiedFlag || "filtered"}</span>
+                    </button>
+                  </li>
+                ))}
+                {!filteredRuns.length ? <li className="muted">No filtered rows</li> : null}
+              </ul>
+            </div>
+
+            <div className="agent-tray needs-fix">
+              <header>
+                <p className="eyebrow">Needs fix</p>
+                <strong>{needsFixRuns.length}</strong>
+              </header>
+              <ul>
+                {needsFixRuns.map((run) => (
+                  <li key={run.id}>
+                    <button
+                      type="button"
+                      className="agent-tray-row"
+                      onClick={() => openFix(run)}
+                    >
+                      <span>
+                        <strong>{run.patientName}</strong>
+                        <em>
+                          {run.issues
+                            .filter((i) => i.severity === "error")
+                            .map((i) => i.code)
+                            .join(", ") || "Fix data"}
+                        </em>
+                      </span>
+                      <span className="chip warn">fix</span>
+                    </button>
+                  </li>
+                ))}
+                {!needsFixRuns.length ? <li className="muted">No data errors</li> : null}
+              </ul>
+            </div>
+          </div>
+        ) : null}
+
+        {selectedRun && !preparing ? (
+          <div className="agent-detail">
+            <AgentGraph run={selectedRun} />
+            {selectedRun.status === "needs_fix" ? (
+              <div className="agent-fix-panel">
+                <p className="eyebrow">Fix tagged fields · re-run agents</p>
+                <div className="agent-fix-grid">
+                  <label className="field">
+                    Value
+                    <input
+                      value={fixDraft.value ?? ""}
+                      onChange={(e) => setFixDraft((d) => ({ ...d, value: e.target.value }))}
+                      placeholder="e.g. 168/102"
+                    />
+                  </label>
+                  <label className="field">
+                    Name
+                    <input
+                      value={fixDraft.name_en ?? ""}
+                      onChange={(e) => setFixDraft((d) => ({ ...d, name_en: e.target.value }))}
+                    />
+                  </label>
+                  <label className="field">
+                    Age
+                    <input
+                      value={fixDraft.age ?? ""}
+                      onChange={(e) => setFixDraft((d) => ({ ...d, age: e.target.value }))}
+                    />
+                  </label>
+                  <label className="field">
+                    Days waiting
+                    <input
+                      value={fixDraft.days_waiting ?? ""}
+                      onChange={(e) =>
+                        setFixDraft((d) => ({ ...d, days_waiting: e.target.value }))
+                      }
+                    />
+                  </label>
+                </div>
+                <div className="action-card-footer">
+                  <button
+                    type="button"
+                    className="btn primary"
+                    disabled={rerunning}
+                    onClick={() => void submitRerun(selectedRun)}
+                  >
+                    {rerunning ? "Re-running…" : "Re-run agents"}
+                  </button>
+                </div>
+              </div>
+            ) : null}
           </div>
         ) : null}
 
@@ -309,114 +468,63 @@ export function Board({
             </div>
 
             {escalatePool.length ? (
-              <p className="banner escalate" role="alert">
-                Escalation: {urgentOpen.length} urgent
-                {breached ? ` · ${breached} SLA breach` : ""} — start with{" "}
-                <strong>
-                  {patientById(
-                    (escalatePool.find((c) => c.urgency === "urgent") ?? escalatePool[0]).patientId,
-                  ).nameEn}
-                </strong>
-                {top ? ` (${top.reasons[0]})` : ""}.
+              <p className="banner bad" role="alert">
+                Escalation: {urgentOpen.length} urgent · {breached} SLA breach
+                {top ? ` — start with ${patientById(top.patientId).nameEn}.` : "."}
               </p>
-            ) : top ? (
-              <p className="banner">
-                Start here: <strong>{patientById(top.case.patientId).nameEn}</strong> —{" "}
-                {top.reasons[0]}. Score {top.score}.
-              </p>
-            ) : (
-              <p className="banner ok">All open loops are clear.</p>
-            )}
+            ) : null}
 
-            <p className="hint">
-              Tap a person to open their full loop. SLA tags show breach / approaching on each row.
+            <p className="muted board-hint">
+              Tap a person to open their full loop. Agent trays above show placed / filtered /
+              needs-fix.
             </p>
 
-            <div className="case-grid">
-              {ranked.map(({ case: row, result, score, reasons }) => {
+            <div className="case-list">
+              {ranked.map(({ case: row, score, reasons }) => {
                 const patient = patientById(row.patientId);
+                const result = resultById(row.resultId);
+                const openRow = isOpen(row.stage);
+                const hours = hoursOpen(row);
                 const sla = planSlaRecovery(row, result);
                 return (
                   <button
                     key={row.id}
                     type="button"
-                    className={`case-row ${sla.status === "breached" ? "breach" : ""} enter-case`}
+                    className={`case-card ${row.urgency} ${sla.status !== "ok" ? "sla-hot" : ""}`}
                     onClick={() => onOpen(row.id)}
                   >
-                    <div>
-                      <h3>
-                        {patient.nameEn}
-                        <span className="name-ar">{patient.nameAr}</span>
-                      </h3>
-                      <p>
-                        {result.labelEn} {result.value}
-                        {result.unit ? ` ${result.unit}` : ""} · {result.program} ·{" "}
-                        {hoursOpen(row).toFixed(0)}h open
-                      </p>
-                    </div>
-                    <div>
-                      <div className="case-row-tags">
+                    <div className="case-card-top">
+                      <div>
+                        <h3>
+                          {patient.nameEn}{" "}
+                          <span className="ar">{patient.nameAr}</span>
+                        </h3>
+                        <p>
+                          {result.labelEn} {result.value}
+                          {result.unit ? ` ${result.unit}` : ""} · {result.program} ·{" "}
+                          {Math.round(hours)} h open
+                        </p>
+                      </div>
+                      <div className="case-card-tags">
                         <span className={`chip ${row.urgency}`}>{row.urgency}</span>
                         {sla.status === "breached" ? (
-                          <span className="chip sla-tag breached">
-                            SLA +{sla.hoursOver.toFixed(0)}h
-                          </span>
+                          <span className="chip hot">SLA +{Math.round(sla.hoursOver)}h</span>
                         ) : sla.status === "approaching" ? (
-                          <span className="chip sla-tag approaching">SLA soon</span>
+                          <span className="chip warn">SLA soon</span>
                         ) : null}
+                        <span className="chip">{STAGE_LABEL[row.stage].en}</span>
                       </div>
-                      <p>{STAGE_LABEL[row.stage].en}</p>
-                      {sla.status !== "ok" ? (
-                        <p className="sla-row-action">{sla.actionLabel}</p>
-                      ) : null}
                     </div>
-                    <div>
-                      <div className="score-pill">
-                        <strong>{score}</strong>
-                        <span className="muted">risk</span>
-                      </div>
-                      <p>{reasons[0]}</p>
+                    <div className="case-card-foot">
+                      <span>{openRow ? sla.actionLabel : STAGE_LABEL[row.stage].en}</span>
+                      <span className="risk-score">{score} risk</span>
+                      <span className="muted">{reasons[0] || row.aiPriorityReason}</span>
+                      <span className="open-cue">Open case →</span>
                     </div>
-                    <span className="case-cta">Open case →</span>
                   </button>
                 );
               })}
             </div>
-
-            {verified ? (
-              <>
-                <p className="section-label">Closed with verified outcome</p>
-                <div className="case-grid">
-                  {cases
-                    .filter((c) => c.stage === "verified")
-                    .map((row) => {
-                      const patient = patientById(row.patientId);
-                      const result = resultById(row.resultId);
-                      return (
-                        <button
-                          key={row.id}
-                          type="button"
-                          className="case-row"
-                          onClick={() => onOpen(row.id)}
-                        >
-                          <div>
-                            <h3>
-                              {patient.nameEn}
-                              <span className="name-ar">{patient.nameAr}</span>
-                            </h3>
-                            <p>
-                              {result.labelEn} · {row.visitNote || "Loop completed"}
-                            </p>
-                          </div>
-                          <span className="chip ok">verified</span>
-                          <div />
-                          <span className="case-cta">View →</span>
-                        </button>
-                      );
-                    })}
-                </div>
-              </>
-            ) : null}
           </>
         ) : null}
       </div>

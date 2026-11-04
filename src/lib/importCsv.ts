@@ -95,7 +95,9 @@ p-khalid,Khalid Al Nuaimi,خالد النعيمي,47,M,en,Daman Enhanced,network
 p-hassan,Hassan Al Blooshi,حسن البلوشي,55,M,en,Daman Basic,network_b,IFHAS,hba1c,6.6,2026-10-25,IFHAS — Baniyas,5,0,yes,no,Recent result; wearable glucose reminder
 p-layla,Layla Al Qubaisi,ليلى القبيسي,41,F,en,Thiqa Family,network_a,IFHAS,vision,Failed,2026-10-20,IFHAS — Khalifa City,9,0,no,no,Vision screen failed referral
 p-omar,Omar Al Dhaheri,عمر الظاهري,36,M,en,ADNIC Care,network_a,EAS,bp,138/88,2026-10-27,EAS — Al Reem,3,0,no,no,Isolated BP 138/88
-p-sara,Sara Al Mansoori,سارة المنصوري,33,F,en,Thiqa Family,network_a,EAS,ldl,3.1,2026-10-28,EAS — Reem,2,0,no,no,Isolated LDL 3.1`;
+p-sara,Sara Al Mansoori,سارة المنصوري,33,F,en,Thiqa Family,network_a,EAS,ldl,3.1,2026-10-28,EAS — Reem,2,0,no,no,Isolated LDL 3.1
+p-bad-bp,Rashid Al Mazrouei,راشد المزروعي,49,M,en,Thiqa Family,network_a,IFHAS,bp,high,2026-10-26,IFHAS — Khalifa City,6,0,no,no,Bad value — agents should tag invalid_bp_format
+p-bad-empty,Hind Al Shamsi,هند الشامسي,40,F,en,Daman Basic,network_b,EAS,hba1c,,2026-10-24,EAS — Mussafah,4,0,no,no,Missing value — agents should tag missing_value`;
 
 /**
  * Parse a screening extract. Core identity + finding columns are required;

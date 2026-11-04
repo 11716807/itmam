@@ -248,6 +248,7 @@ export default function App() {
           {screen === "board" ? (
             <Board
               cases={state.cases}
+              agentRuns={state.agentRuns}
               importSource={state.importSource}
               preparing={preparing}
               riskWeights={riskWeights}
@@ -271,17 +272,32 @@ export default function App() {
                   stamp({
                     ...resetState(),
                     importSource: null,
+                    agentRuns: [],
                   }),
                 );
               }}
-              onPrepareCase={(care, source) => {
+              onAgentRun={(run, care, source) => {
                 const snap = snapshotRegistry();
-                setState((current) =>
-                  stamp({
+                setState((current) => {
+                  const agentRuns = [
+                    ...current.agentRuns.filter((r) => r.id !== run.id && r.rowKey !== run.rowKey),
+                    run,
+                  ];
+                  if (!care) {
+                    return stamp({
+                      ...current,
+                      importSource: source,
+                      patients: snap.patients,
+                      results: snap.results,
+                      agentRuns,
+                    });
+                  }
+                  return stamp({
                     ...current,
                     importSource: source,
                     patients: snap.patients,
                     results: snap.results,
+                    agentRuns,
                     cases: [...current.cases.filter((c) => c.id !== care.id), care],
                     selectedCaseId: current.selectedCaseId || care.id,
                     audit: [
@@ -292,19 +308,59 @@ export default function App() {
                         at: new Date().toISOString().slice(0, 16),
                         actor: "system",
                         action: "imported",
-                        detail: care.aiPriorityReason || "Enriched from import extract",
+                        detail: care.aiPriorityReason || "Agent pipeline placed finding",
                       },
                     ],
-                  }),
-                );
+                  });
+                });
               }}
-              onPrepareDone={(placed, skipped) => {
+              onReplaceAgentRun={(run, care) => {
+                const snap = snapshotRegistry();
+                setState((current) => {
+                  const agentRuns = current.agentRuns.map((r) => (r.id === run.id ? run : r));
+                  if (!agentRuns.some((r) => r.id === run.id)) agentRuns.push(run);
+                  let cases = current.cases.filter((c) => c.agentRunId !== run.id && c.id !== care?.id);
+                  const audit = [...current.audit];
+                  if (care) {
+                    cases = [...cases, care];
+                    audit.push({
+                      id: `aud-rerun-${care.id}-${Date.now()}`,
+                      caseId: care.id,
+                      at: new Date().toISOString().slice(0, 16),
+                      actor: "coordinator",
+                      action: "imported",
+                      detail: `Re-ran agents after fix — ${care.aiPriorityReason || "placed"}`,
+                    });
+                  }
+                  return stamp({
+                    ...current,
+                    patients: snap.patients,
+                    results: snap.results,
+                    agentRuns,
+                    cases,
+                    audit,
+                    selectedCaseId: care?.id || current.selectedCaseId,
+                  });
+                });
+                setToast({
+                  id: `rerun-${Date.now()}`,
+                  title:
+                    run.status === "placed"
+                      ? "Agents re-ran — placed"
+                      : run.status === "filtered"
+                        ? "Agents re-ran — filtered"
+                        : "Still needs fix",
+                  detail: run.explainEn || run.priorityReason || run.gateReason || "",
+                  tone: run.status === "needs_fix" ? "warn" : "ok",
+                });
+              }}
+              onPrepareDone={(placed, filtered, needsFix) => {
                 setPreparing(false);
                 setToast({
                   id: `prep-${Date.now()}`,
-                  title: placed ? "Board prepared" : "Nothing placed",
-                  detail: `${placed} loops opened · ${skipped} rows skipped.`,
-                  tone: placed ? "ok" : "warn",
+                  title: placed ? "Agent pipeline done" : "Nothing placed",
+                  detail: `${placed} placed · ${filtered} filtered · ${needsFix} need fix.`,
+                  tone: placed || filtered ? "ok" : "warn",
                 });
               }}
             />
@@ -315,6 +371,11 @@ export default function App() {
               care={selected}
               messages={state.messages}
               audit={state.audit}
+              agentRun={
+                state.agentRuns.find(
+                  (r) => r.id === selected.agentRunId || r.careId === selected.id,
+                ) ?? null
+              }
               onPatch={patchCase}
               onPatient={() => setScreen("patient")}
               onClinician={() => setScreen("clinician")}
