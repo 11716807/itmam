@@ -107,7 +107,7 @@ Itmam closes the IFHAS/EAS screening-to-care loop — every actionable result ge
 > “Clear status: Appointment booked — time and clinician.  
 > When the visit is done, this becomes Visit completed, then Verified.”
 
-**Click back:** Case (or Clinician)
+**Click back:** Case
 
 ---
 
@@ -119,7 +119,7 @@ Add a short visit note, e.g. `BP reviewed; lifestyle plan; repeat in 3 months.`
 **Click:** Mark visit completed  
 
 **Say:**
-> “Same language everywhere — Mark visit completed. Not ‘seen’ in one place and something else in another.”
+> “Visit complete and verify stay on the Case screen — same loop language, no separate clinician tab.”
 
 **Click:** Verify outcome  
 
@@ -128,16 +128,7 @@ Add a short visit note, e.g. `BP reviewed; lifestyle plan; repeat in 3 months.`
 
 ---
 
-## 8. Clinician view (20 sec — optional)
-
-**Click:** Clinician  
-
-**Say:**
-> “Clinician gets the packet, the same timeline, and the same Mark visit completed / Verify outcome actions. Coordinators and clinicians share one loop language.”
-
----
-
-## 9. Outcomes close (20 sec)
+## 8. Outcomes close (20 sec)
 
 **Click:** Outcomes  
 

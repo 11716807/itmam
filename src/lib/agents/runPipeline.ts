@@ -3,6 +3,7 @@ import type { ImportRow } from "../importCsv";
 import type { CareCase } from "../../types";
 import { enrichAgent } from "./enrichAgent";
 import { explainAgent, localExplain } from "./explainAgent";
+import { evaluateGuardrails, type GuardrailContext } from "./guardrails";
 import { gateAgent } from "./gateAgent";
 import { priorityAgent } from "./priorityAgent";
 import { applyPatchToRow } from "./rerunFromPatch";
@@ -62,6 +63,7 @@ function makeNode(
   output: unknown,
   notes: string,
   startedAt: string,
+  guardCtx: GuardrailContext = {},
 ): AgentNodeTrace {
   return {
     id,
@@ -72,6 +74,7 @@ function makeNode(
     notes,
     startedAt,
     finishedAt: stamp(),
+    guardrails: evaluateGuardrails(id, guardCtx),
   };
 }
 
@@ -120,8 +123,9 @@ export async function runAgentPipeline(
         metrics: working.metrics,
       },
       { normalized: true, rowKey: working.result.id },
-      "Raw extract row captured",
+      "Raw extract row captured · guardrails held",
       t0,
+      { row: working },
     ),
   );
 
@@ -137,6 +141,7 @@ export async function runAgentPipeline(
       { issues: validation.issues, hardFail: validation.hardFail },
       validation.notes,
       t0,
+      { row: working, issues: validation.issues, hardFail: validation.hardFail },
     ),
   );
 
@@ -144,7 +149,15 @@ export async function runAgentPipeline(
     // Skip remaining decision agents — mark as skipped for graph visibility
     for (const id of ["enrich", "gate", "priority", "route"] as AgentNodeId[]) {
       nodes.push(
-        makeNode(id, "skipped", null, null, "Skipped — fix validation errors first", stamp()),
+        makeNode(
+          id,
+          "skipped",
+          null,
+          null,
+          "Skipped — validate hard-fail guardrail",
+          stamp(),
+          { hardFail: true, issues: validation.issues, runStatus: "needs_fix" },
+        ),
       );
     }
     const run: AgentRun = {
@@ -164,17 +177,21 @@ export async function runAgentPipeline(
       },
       finishedAt: stamp(),
     };
-    if (opts.explain !== false) {
-      t0 = stamp();
-      const explainEn = await explainAgent(run);
-      run.nodes.push(makeNode("explain", "ok", { status: run.status }, { explainEn }, "Narration only", t0));
-      run.explainEn = explainEn;
-    } else {
-      run.explainEn = localExplain(run);
-      run.nodes.push(
-        makeNode("explain", "ok", { status: run.status }, { explainEn: run.explainEn }, "Local narration", stamp()),
-      );
-    }
+    const explainEn =
+      opts.explain !== false ? await explainAgent(run) : localExplain(run);
+    t0 = stamp();
+    run.explainEn = explainEn;
+    run.nodes.push(
+      makeNode(
+        "explain",
+        "ok",
+        { status: run.status },
+        { explainEn },
+        opts.explain !== false ? "Narration only · guardrails held" : "Local narration · guardrails held",
+        t0,
+        { runStatus: run.status, explainEn },
+      ),
+    );
     return { run, care: null };
   }
 
@@ -194,6 +211,7 @@ export async function runAgentPipeline(
       },
       enrichNotes,
       t0,
+      { enrichment },
     ),
   );
 
@@ -209,21 +227,37 @@ export async function runAgentPipeline(
       { include: gate.include, gateReason: gate.gateReason },
       gate.notes,
       t0,
+      { enrichment, gateInclude: gate.include, gateReason: gate.gateReason },
     ),
   );
 
   if (!gate.include) {
     nodes.push(
-      makeNode("priority", "skipped", null, null, "Skipped — filtered at gate", stamp()),
+      makeNode(
+        "priority",
+        "skipped",
+        null,
+        null,
+        "Skipped — gate filter guardrail",
+        stamp(),
+        { gateInclude: false, gateReason: gate.gateReason, enrichment },
+      ),
     );
     nodes.push(
       makeNode(
         "route",
         "filtered",
         { gate: gate.gateReason },
-        { destination: "filtered", next: "Visible on Filtered tray" },
-        "Routed to Filtered / low priority",
+        { destination: "filtered", next: "Visible on Not on board tray" },
+        "Routed to filtered tray · no silent drop",
         stamp(),
+        {
+          gateInclude: false,
+          gateReason: gate.gateReason,
+          runStatus: "filtered",
+          destination: "filtered",
+          careId: null,
+        },
       ),
     );
     const run: AgentRun = {
@@ -241,17 +275,21 @@ export async function runAgentPipeline(
       classifiedFlag: enrichment.classifiedFlag,
       finishedAt: stamp(),
     };
-    if (opts.explain !== false) {
-      t0 = stamp();
-      const explainEn = await explainAgent(run);
-      run.nodes.push(makeNode("explain", "ok", { status: run.status }, { explainEn }, "Narration only", t0));
-      run.explainEn = explainEn;
-    } else {
-      run.explainEn = localExplain(run);
-      run.nodes.push(
-        makeNode("explain", "ok", { status: run.status }, { explainEn: run.explainEn }, "Local narration", stamp()),
-      );
-    }
+    const explainEn =
+      opts.explain !== false ? await explainAgent(run) : localExplain(run);
+    t0 = stamp();
+    run.explainEn = explainEn;
+    run.nodes.push(
+      makeNode(
+        "explain",
+        "ok",
+        { status: run.status },
+        { explainEn },
+        opts.explain !== false ? "Narration only · guardrails held" : "Local narration · guardrails held",
+        t0,
+        { runStatus: run.status, explainEn },
+      ),
+    );
     return { run, care: null };
   }
 
@@ -272,6 +310,12 @@ export async function runAgentPipeline(
       },
       priority.notes,
       t0,
+      {
+        enrichment,
+        urgency: priority.urgency,
+        slaHours: priority.slaHours,
+        specialty: priority.specialty,
+      },
     ),
   );
 
@@ -290,6 +334,13 @@ export async function runAgentPipeline(
       { destination: "placed", careId: care.id, next: "Confirm priority on Case" },
       `Placed on board as ${priority.urgency}`,
       t0,
+      {
+        gateInclude: true,
+        gateReason: gate.gateReason,
+        runStatus: "placed",
+        destination: "placed",
+        careId: care.id,
+      },
     ),
   );
 
@@ -312,17 +363,21 @@ export async function runAgentPipeline(
     finishedAt: stamp(),
   };
 
-  if (opts.explain !== false) {
-    t0 = stamp();
-    const explainEn = await explainAgent(run);
-    run.nodes.push(makeNode("explain", "ok", { status: run.status }, { explainEn }, "Narration only", t0));
-    run.explainEn = explainEn;
-  } else {
-    run.explainEn = localExplain(run);
-    run.nodes.push(
-      makeNode("explain", "ok", { status: run.status }, { explainEn: run.explainEn }, "Local narration", stamp()),
-    );
-  }
+  const explainEn =
+    opts.explain !== false ? await explainAgent(run) : localExplain(run);
+  t0 = stamp();
+  run.explainEn = explainEn;
+  run.nodes.push(
+    makeNode(
+      "explain",
+      "ok",
+      { status: run.status },
+      { explainEn },
+      opts.explain !== false ? "Narration only · guardrails held" : "Local narration · guardrails held",
+      t0,
+      { runStatus: run.status, explainEn },
+    ),
+  );
 
   return { run, care };
 }

@@ -151,7 +151,6 @@ export type AppScreen =
   | "board"
   | "case"
   | "patient"
-  | "clinician"
   | "outcomes"
   | "audit"
   | "rules";

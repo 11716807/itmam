@@ -1,6 +1,7 @@
 import { enrichmentToCase } from "./enrich";
 import { enrichAgent } from "./agents/enrichAgent";
 import { localExplain } from "./agents/explainAgent";
+import { evaluateGuardrails, type GuardrailContext } from "./agents/guardrails";
 import { gateAgent } from "./agents/gateAgent";
 import { priorityAgent } from "./agents/priorityAgent";
 import {
@@ -78,6 +79,7 @@ function syncRunAgentPipeline(row: ImportRow): { run: AgentRun; care: CareCase |
     input: unknown,
     output: unknown,
     notes: string,
+    guardCtx: GuardrailContext = {},
   ): AgentNodeTrace => ({
     id,
     label: AGENT_LABELS[id],
@@ -87,6 +89,7 @@ function syncRunAgentPipeline(row: ImportRow): { run: AgentRun; care: CareCase |
     notes,
     startedAt: now,
     finishedAt: now,
+    guardrails: evaluateGuardrails(id, guardCtx),
   });
 
   nodes.push(
@@ -95,7 +98,8 @@ function syncRunAgentPipeline(row: ImportRow): { run: AgentRun; care: CareCase |
       "ok",
       { patient_id: working.patient.id, value: working.result.value },
       { normalized: true },
-      "Raw extract row captured",
+      "Raw extract row captured · guardrails held",
+      { row: working },
     ),
   );
 
@@ -107,12 +111,19 @@ function syncRunAgentPipeline(row: ImportRow): { run: AgentRun; care: CareCase |
       { value: working.result.value },
       { issues: validation.issues, hardFail: validation.hardFail },
       validation.notes,
+      { row: working, issues: validation.issues, hardFail: validation.hardFail },
     ),
   );
 
   if (validation.hardFail) {
     for (const id of ["enrich", "gate", "priority", "route"] as AgentNodeId[]) {
-      nodes.push(node(id, "skipped", null, null, "Skipped — fix validation errors first"));
+      nodes.push(
+        node(id, "skipped", null, null, "Skipped — validate hard-fail guardrail", {
+          hardFail: true,
+          issues: validation.issues,
+          runStatus: "needs_fix",
+        }),
+      );
     }
     const run: AgentRun = {
       id: runId,
@@ -133,7 +144,14 @@ function syncRunAgentPipeline(row: ImportRow): { run: AgentRun; care: CareCase |
     };
     run.explainEn = localExplain(run);
     run.nodes.push(
-      node("explain", "ok", { status: run.status }, { explainEn: run.explainEn }, "Local narration"),
+      node(
+        "explain",
+        "ok",
+        { status: run.status },
+        { explainEn: run.explainEn },
+        "Local narration · guardrails held",
+        { runStatus: run.status, explainEn: run.explainEn },
+      ),
     );
     return { run, care: null };
   }
@@ -146,6 +164,7 @@ function syncRunAgentPipeline(row: ImportRow): { run: AgentRun; care: CareCase |
       { code: working.result.code, value: working.result.value },
       { classifiedFlag: enrichment.classifiedFlag, signals: enrichment.signals },
       enrichNotes,
+      { enrichment },
     ),
   );
 
@@ -157,18 +176,31 @@ function syncRunAgentPipeline(row: ImportRow): { run: AgentRun; care: CareCase |
       { classifiedFlag: enrichment.classifiedFlag },
       { include: gate.include, gateReason: gate.gateReason },
       gate.notes,
+      { enrichment, gateInclude: gate.include, gateReason: gate.gateReason },
     ),
   );
 
   if (!gate.include) {
-    nodes.push(node("priority", "skipped", null, null, "Skipped — filtered at gate"));
+    nodes.push(
+      node("priority", "skipped", null, null, "Skipped — gate filter guardrail", {
+        gateInclude: false,
+        gateReason: gate.gateReason,
+        enrichment,
+      }),
+    );
     nodes.push(
       node(
         "route",
         "filtered",
         { gate: gate.gateReason },
         { destination: "filtered" },
-        "Routed to Filtered / low priority",
+        "Routed to filtered tray · no silent drop",
+        {
+          gateInclude: false,
+          gateReason: gate.gateReason,
+          runStatus: "filtered",
+          destination: "filtered",
+        },
       ),
     );
     const run: AgentRun = {
@@ -188,7 +220,14 @@ function syncRunAgentPipeline(row: ImportRow): { run: AgentRun; care: CareCase |
     };
     run.explainEn = localExplain(run);
     run.nodes.push(
-      node("explain", "ok", { status: run.status }, { explainEn: run.explainEn }, "Local narration"),
+      node(
+        "explain",
+        "ok",
+        { status: run.status },
+        { explainEn: run.explainEn },
+        "Local narration · guardrails held",
+        { runStatus: run.status, explainEn: run.explainEn },
+      ),
     );
     return { run, care: null };
   }
@@ -206,6 +245,12 @@ function syncRunAgentPipeline(row: ImportRow): { run: AgentRun; care: CareCase |
         priorityReason: priority.priorityReason,
       },
       priority.notes,
+      {
+        enrichment,
+        urgency: priority.urgency,
+        slaHours: priority.slaHours,
+        specialty: priority.specialty,
+      },
     ),
   );
 
@@ -220,6 +265,13 @@ function syncRunAgentPipeline(row: ImportRow): { run: AgentRun; care: CareCase |
       { urgency: priority.urgency },
       { destination: "placed", careId: care.id },
       `Placed on board as ${priority.urgency}`,
+      {
+        gateInclude: true,
+        gateReason: gate.gateReason,
+        runStatus: "placed",
+        destination: "placed",
+        careId: care.id,
+      },
     ),
   );
 
@@ -243,7 +295,14 @@ function syncRunAgentPipeline(row: ImportRow): { run: AgentRun; care: CareCase |
   };
   run.explainEn = localExplain(run);
   run.nodes.push(
-    node("explain", "ok", { status: run.status }, { explainEn: run.explainEn }, "Local narration"),
+    node(
+      "explain",
+      "ok",
+      { status: run.status },
+      { explainEn: run.explainEn },
+      "Local narration · guardrails held",
+      { runStatus: run.status, explainEn: run.explainEn },
+    ),
   );
   return { run, care };
 }

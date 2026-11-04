@@ -42,7 +42,6 @@ type Props = {
   agentRun?: AgentRun | null;
   onPatch: (next: CareCase, events: AuditEvent[], message?: Message) => void;
   onPatient: () => void;
-  onClinician: () => void;
   onBack: () => void;
 };
 
@@ -278,7 +277,7 @@ export function CaseView(props: Props) {
   const findingLine = `${result.labelEn} ${result.value}${result.unit ? ` ${result.unit}` : ""}`;
   const nextLabel =
     stage === "result_in"
-      ? "Prioritize"
+      ? "Confirm priority"
       : stage === "stratified"
         ? "Tell patient"
         : stage === "told"
@@ -305,7 +304,7 @@ export function CaseView(props: Props) {
 
   return (
     <section className="panel">
-      <header className="panel-head">
+      <header className="panel-head case-head">
         <div>
           <button type="button" className="text-link" onClick={props.onBack}>
             ← Board
@@ -317,13 +316,21 @@ export function CaseView(props: Props) {
           <p className="lede">
             {result.program} · {findingLine} · {result.facility}
           </p>
+          <div className="case-head-tags">
+            <span
+              className={`chip ${stage === "verified" ? "ok" : stage === "lost" ? "warn" : props.care.urgency}`}
+            >
+              {STAGE_LABEL[stage].en}
+            </span>
+            <span className={`chip ${props.care.urgency}`}>{props.care.urgency}</span>
+            <span className="case-next-pill">
+              Next · {nextLabel}
+            </span>
+          </div>
         </div>
         <div className="row-actions">
           <button type="button" className="btn" onClick={props.onPatient}>
             Patient view
-          </button>
-          <button type="button" className="btn" onClick={props.onClinician}>
-            Clinician view
           </button>
         </div>
       </header>
@@ -356,88 +363,14 @@ export function CaseView(props: Props) {
         <div className="case-layout">
           <CareTimeline care={props.care} />
 
-          {props.agentRun ? (
-            <div className="case-agent-block">
-              <AgentGraphStrip
-                run={props.agentRun}
-                onOpen={() => setShowAgentGraph(true)}
-              />
-            </div>
-          ) : null}
-
-          {showAgentGraph && props.agentRun ? (
-            <AgentGraph run={props.agentRun} onClose={() => setShowAgentGraph(false)} />
-          ) : null}
-
-          <div className="split">
-          <div className="block">
-            <h3>Finding & coverage</h3>
-            <dl className="facts">
-              <div>
-                <dt>Result</dt>
-                <dd>{findingLine}</dd>
-              </div>
-              <div>
-                <dt>Recorded</dt>
-                <dd>{result.recordedAt}</dd>
-              </div>
-              <div>
-                <dt>Insurance</dt>
-                <dd>
-                  {patient.insurancePlan} · {patient.network.replace("_", " ")}
-                </dd>
-              </div>
-              <div>
-                <dt>Specialty</dt>
-                <dd>{specialtyLabel(props.care.specialty)}</dd>
-              </div>
-              <div>
-                <dt>Visit clinician</dt>
-                <dd>
-                  {props.care.ownerId ? clinicianById(props.care.ownerId).nameEn : "Unassigned"}
-                </dd>
-              </div>
-              <div>
-                <dt>Appointment</dt>
-                <dd>
-                  {props.care.slotId
-                    ? (() => {
-                        const s = slotById(props.care.slotId);
-                        const doc = clinicianById(s.clinicianId);
-                        return `${s.when.replace("T", " ")} · ${doc.nameEn}`;
-                      })()
-                    : "Not booked"}
-                </dd>
-              </div>
-            </dl>
-
-            <div className="ai-card">
-              <h3 className="subhead" style={{ marginBottom: 8 }}>
-                Case brief
-              </h3>
-              <p>
-                <strong>{brief.headlineEn}</strong>
-              </p>
-              <p className="muted">{brief.explainEn}</p>
-              <p>
-                <strong>Why now:</strong> {brief.priorityReason}
-              </p>
-              <ul>
-                {brief.nextSteps.map((s) => (
-                  <li key={s}>{s}</li>
-                ))}
-              </ul>
-            </div>
-
+          <div className="split case-work-split">
+          <div className="block case-work">
             <div className="action-panel">
               <div className="action-panel-head">
                 <div>
                   <p className="eyebrow">Next action</p>
                   <h3>{nextLabel}</h3>
                 </div>
-                <span className={`chip ${stage === "verified" ? "ok" : stage === "lost" ? "warn" : props.care.urgency}`}>
-                  {STAGE_LABEL[stage].en}
-                </span>
               </div>
 
               <ol className="action-progress">
@@ -726,9 +659,6 @@ export function CaseView(props: Props) {
                     />
                   </label>
                   <div className="action-card-footer">
-                    <button type="button" className="btn" onClick={props.onClinician}>
-                      Open clinician view
-                    </button>
                     <button type="button" className="btn ghost" onClick={runNoShow}>
                       Patient no-show — rebook
                     </button>
@@ -920,9 +850,69 @@ export function CaseView(props: Props) {
                 </div>
               ) : null}
             </div>
+
+            <details className="case-context">
+              <summary>Finding & coverage</summary>
+              <dl className="facts">
+                <div>
+                  <dt>Result</dt>
+                  <dd>{findingLine}</dd>
+                </div>
+                <div>
+                  <dt>Recorded</dt>
+                  <dd>{result.recordedAt}</dd>
+                </div>
+                <div>
+                  <dt>Insurance</dt>
+                  <dd>
+                    {patient.insurancePlan} · {patient.network.replace("_", " ")}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Specialty</dt>
+                  <dd>{specialtyLabel(props.care.specialty)}</dd>
+                </div>
+                <div>
+                  <dt>Visit clinician</dt>
+                  <dd>
+                    {props.care.ownerId ? clinicianById(props.care.ownerId).nameEn : "Unassigned"}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Appointment</dt>
+                  <dd>
+                    {props.care.slotId
+                      ? (() => {
+                          const s = slotById(props.care.slotId);
+                          const doc = clinicianById(s.clinicianId);
+                          return `${s.when.replace("T", " ")} · ${doc.nameEn}`;
+                        })()
+                      : "Not booked"}
+                  </dd>
+                </div>
+              </dl>
+            </details>
+
+            <details className="case-context">
+              <summary>Case brief</summary>
+              <div className="ai-card nested">
+                <p>
+                  <strong>{brief.headlineEn}</strong>
+                </p>
+                <p className="muted">{brief.explainEn}</p>
+                <p>
+                  <strong>Why now:</strong> {brief.priorityReason}
+                </p>
+                <ul>
+                  {brief.nextSteps.map((s) => (
+                    <li key={s}>{s}</li>
+                  ))}
+                </ul>
+              </div>
+            </details>
           </div>
 
-          <div>
+          <div className="case-side">
             <CaseAsk
               care={props.care}
               patient={patient}
@@ -930,7 +920,7 @@ export function CaseView(props: Props) {
               messages={props.messages}
               audit={props.audit}
             />
-            <div className="block" style={{ marginTop: 12 }}>
+            <div className="block">
               <h3>Sahhatna outbox</h3>
               {!caseMessages.length ? (
                 <p className="muted">No patient message yet.</p>
@@ -952,6 +942,21 @@ export function CaseView(props: Props) {
             </div>
           </div>
           </div>
+
+          {props.agentRun ? (
+            <div className="case-agent-block">
+              <AgentGraphStrip
+                run={props.agentRun}
+                onOpen={() => setShowAgentGraph((v) => !v)}
+              />
+              {showAgentGraph ? (
+                <AgentGraph
+                  run={props.agentRun}
+                  onClose={() => setShowAgentGraph(false)}
+                />
+              ) : null}
+            </div>
+          ) : null}
         </div>
       </div>
     </section>

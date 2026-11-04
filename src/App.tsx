@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Toast, type ToastItem } from "./components/Toast";
 import { Board } from "./screens/Board";
 import { CaseView } from "./screens/CaseView";
-import { ClinicianView } from "./screens/ClinicianView";
 import { AuditLog } from "./screens/AuditLog";
 import { Outcomes } from "./screens/Outcomes";
 import { PatientView } from "./screens/PatientView";
@@ -73,14 +72,13 @@ const TOAST_COPY: Record<string, { title: string; detail: string; tone: ToastIte
   },
 };
 
-const NAV: { id: AppScreen; label: string; hint: string }[] = [
-  { id: "board", label: "Board", hint: "Import & prioritize" },
-  { id: "case", label: "Case", hint: "Close the loop" },
-  { id: "patient", label: "Patient", hint: "Sahhatna view" },
-  { id: "clinician", label: "Clinician", hint: "Visit & verify" },
-  { id: "outcomes", label: "Outcomes", hint: "Completion proof" },
-  { id: "audit", label: "Audit", hint: "Trail by patient" },
-  { id: "rules", label: "Risk rules", hint: "Editable score weights" },
+const NAV: { id: AppScreen; label: string; hint: string; group: "work" | "review" }[] = [
+  { id: "board", label: "Board", hint: "Import & prioritize", group: "work" },
+  { id: "case", label: "Case", hint: "Close the loop", group: "work" },
+  { id: "patient", label: "Patient", hint: "Sahhatna view", group: "work" },
+  { id: "outcomes", label: "Outcomes", hint: "Completion proof", group: "review" },
+  { id: "audit", label: "Audit", hint: "Trail by patient", group: "review" },
+  { id: "rules", label: "Risk rules", hint: "Score weights", group: "review" },
 ];
 
 export default function App() {
@@ -216,7 +214,21 @@ export default function App() {
         </div>
 
         <nav className="side-nav" aria-label="Primary">
-          {NAV.map((item) => (
+          <p className="nav-group-label">Work</p>
+          {NAV.filter((item) => item.group === "work").map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              className={screen === item.id ? "on" : undefined}
+              onClick={() => setScreen(item.id)}
+              disabled={preparing && item.id !== "board"}
+            >
+              <strong>{item.label}</strong>
+              <span>{item.hint}</span>
+            </button>
+          ))}
+          <p className="nav-group-label">Review</p>
+          {NAV.filter((item) => item.group === "review").map((item) => (
             <button
               key={item.id}
               type="button"
@@ -378,7 +390,6 @@ export default function App() {
               }
               onPatch={patchCase}
               onPatient={() => setScreen("patient")}
-              onClinician={() => setScreen("clinician")}
               onBack={() => setScreen("board")}
             />
           ) : null}
@@ -400,21 +411,6 @@ export default function App() {
               cases={state.cases}
               selectedId={selected?.id ?? null}
               messages={state.messages}
-              onSelect={(id) => {
-                setState((current) => stamp({ ...current, selectedCaseId: id }));
-              }}
-              onClearSelect={() => {
-                setState((current) => stamp({ ...current, selectedCaseId: "" }));
-              }}
-              onPatch={patchCase}
-              onOpenCase={() => setScreen("case")}
-            />
-          ) : null}
-
-          {screen === "clinician" ? (
-            <ClinicianView
-              cases={state.cases}
-              selectedId={selected?.id ?? null}
               onSelect={(id) => {
                 setState((current) => stamp({ ...current, selectedCaseId: id }));
               }}

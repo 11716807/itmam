@@ -51,6 +51,7 @@ export function Board({
   const [graphRunId, setGraphRunId] = useState<string | null>(null);
   const [fixDraft, setFixDraft] = useState<AgentEditablePatch>({});
   const [rerunning, setRerunning] = useState(false);
+  const [heldOpen, setHeldOpen] = useState(false);
 
   const resultsById = Object.fromEntries(
     cases.map((c) => [c.resultId, resultById(c.resultId)]),
@@ -72,15 +73,15 @@ export function Board({
     [agentRuns],
   );
 
-  const graphRun = graphRunId
-    ? agentRuns.find((r) => r.id === graphRunId) ?? null
-    : null;
-
   function runForCase(care: CareCase): AgentRun | undefined {
     return agentRuns.find((r) => r.id === care.agentRunId || r.careId === care.id);
   }
 
-  function openAgents(run: AgentRun) {
+  function toggleAgents(run: AgentRun) {
+    if (graphRunId === run.id) {
+      setGraphRunId(null);
+      return;
+    }
     setGraphRunId(run.id);
     setFixDraft({
       value: run.editablePatch?.value ?? run.rawRow.result.value,
@@ -173,8 +174,8 @@ export function Board({
           <h2>Close every actionable result</h2>
           {firstImport && !preparing ? (
             <p className="lede">
-              Import a screening extract. Agents validate and prioritize each row — use{" "}
-              <strong>Agents</strong> on a person to open the green decision path.
+              Import a screening extract. Agents validate and prioritize each row — expand{" "}
+              <strong>How decided</strong> on any person to see the path.
             </p>
           ) : null}
         </div>
@@ -245,8 +246,8 @@ export function Board({
             <h3>Import screening data</h3>
             <p>
               Drop an IFHAS/EAS CSV — or any extract with patient + finding columns. Extra metrics
-              like <code>days_waiting</code> feed priority. Open <strong>Agents</strong> on any row
-              to see the decision path.
+              like <code>days_waiting</code> feed priority. Expand <strong>How decided</strong> on
+              any row to inspect the agent path.
             </p>
             {error ? <p className="import-error">{error}</p> : null}
             <div className="import-hero-actions">
@@ -265,97 +266,113 @@ export function Board({
 
         {hasBoard ? (
           <>
-            <div className="kpi-row">
-              <div className="kpi">
-                <span>Open loops</span>
+            <div className="stat-strip" aria-label="Board summary">
+              <div className="stat">
+                <span>Open</span>
                 <strong>{open.length}</strong>
               </div>
-              <div className={`kpi ${breached ? "hot" : ""}`}>
+              <div className={`stat ${breached ? "hot" : ""}`}>
                 <span>SLA breach</span>
                 <strong>{breached}</strong>
               </div>
-              <div className="kpi ok">
+              <div className="stat ok">
                 <span>Verified</span>
                 <strong>{verified}</strong>
               </div>
-              <div className={`kpi ${lost ? "warn" : ""}`}>
+              <div className={`stat ${lost ? "warn" : ""}`}>
                 <span>Lost</span>
                 <strong>{lost}</strong>
               </div>
             </div>
 
-            {escalatePool.length ? (
-              <p className="banner bad" role="alert">
-                Escalation: {urgentOpen.length} urgent · {breached} SLA breach
-                {top ? ` — start with ${patientById(top.patientId).nameEn}.` : "."}
-              </p>
+            {escalatePool.length && top ? (
+              <div className="escalate-bar" role="alert">
+                <div>
+                  <strong>
+                    {urgentOpen.length} urgent · {breached} SLA breach
+                  </strong>
+                  <span>Start with {patientById(top.patientId).nameEn}</span>
+                </div>
+                <button type="button" className="btn primary" onClick={() => onOpen(top.id)}>
+                  Open {patientById(top.patientId).nameEn.split(" ")[0]} →
+                </button>
+              </div>
             ) : null}
 
-            <p className="muted board-hint">
-              Tap a person to open their loop. Use <strong>Agents</strong> on a row for the green
-              decision path (input → decision → output per node).
-            </p>
-
-            <div className="case-list">
+            <div className="case-grid">
               {ranked.map(({ case: row, score, reasons }) => {
                 const patient = patientById(row.patientId);
                 const result = resultById(row.resultId);
-                const openRow = isOpen(row.stage);
-                const hours = hoursOpen(row);
                 const sla = planSlaRecovery(row, result);
                 const run = runForCase(row);
+                const expanded = Boolean(run && graphRunId === run.id);
                 return (
-                  <div
+                  <article
                     key={row.id}
-                    className={`case-card-row ${row.urgency} ${sla.status !== "ok" ? "sla-hot" : ""}`}
+                    className={`case-block ${expanded ? "expanded" : ""}`}
                   >
                     <button
                       type="button"
-                      className={`case-card ${row.urgency}`}
+                      className={`case-row ${sla.status === "breached" ? "breach" : ""} enter-case`}
                       onClick={() => onOpen(row.id)}
                     >
-                      <div className="case-card-top">
-                        <div>
-                          <h3>
-                            {patient.nameEn}{" "}
-                            <span className="ar">{patient.nameAr}</span>
-                          </h3>
-                          <p>
-                            {result.labelEn} {result.value}
-                            {result.unit ? ` ${result.unit}` : ""} · {result.program} ·{" "}
-                            {Math.round(hours)} h open
-                          </p>
-                        </div>
-                        <div className="case-card-tags">
+                      <div className="case-row-main">
+                        <h3>
+                          {patient.nameEn}
+                          <span className="name-ar">{patient.nameAr}</span>
+                        </h3>
+                        <p>
+                          {result.labelEn} {result.value}
+                          {result.unit ? ` ${result.unit}` : ""} · {result.program} ·{" "}
+                          {hoursOpen(row).toFixed(0)}h open
+                        </p>
+                        <div className="case-row-tags">
                           <span className={`chip ${row.urgency}`}>{row.urgency}</span>
                           {sla.status === "breached" ? (
-                            <span className="chip hot">SLA +{Math.round(sla.hoursOver)}h</span>
+                            <span className="chip sla-tag breached">
+                              SLA +{sla.hoursOver.toFixed(0)}h
+                            </span>
                           ) : sla.status === "approaching" ? (
-                            <span className="chip warn">SLA soon</span>
+                            <span className="chip sla-tag approaching">SLA soon</span>
                           ) : null}
-                          <span className="chip">{STAGE_LABEL[row.stage].en}</span>
+                          <span className="chip stage-chip">{STAGE_LABEL[row.stage].en}</span>
                         </div>
                       </div>
-                      <div className="case-card-foot">
-                        <span>{openRow ? sla.actionLabel : STAGE_LABEL[row.stage].en}</span>
-                        <span className="risk-score">{score} risk</span>
-                        <span className="muted">{reasons[0] || row.aiPriorityReason}</span>
-                        <span className="open-cue">Open case →</span>
+                      <div className="case-row-side">
+                        <div className="score-pill">
+                          <strong>{score}</strong>
+                          <span className="muted">risk</span>
+                        </div>
+                        <p className="case-row-why">{reasons[0] || row.aiPriorityReason}</p>
+                        {sla.status !== "ok" ? (
+                          <p className="sla-row-action">{sla.actionLabel}</p>
+                        ) : (
+                          <p className="case-cta">Open case →</p>
+                        )}
                       </div>
                     </button>
                     {run ? (
-                      <button
-                        type="button"
-                        className="btn agents-row-btn"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          openAgents(run);
-                        }}
-                      >
-                        Agents
-                      </button>
+                      <div className="case-row-tools">
+                        <button
+                          type="button"
+                          className={`how-decided ${expanded ? "on" : ""}`}
+                          onClick={() => toggleAgents(run)}
+                          aria-expanded={expanded}
+                        >
+                          {expanded ? "Hide agent harness" : "How decided · agent harness"}
+                        </button>
+                      </div>
                     ) : null}
-                  </div>
+                    {expanded && run ? (
+                      <AgentGraph
+                        run={run}
+                        fixDraft={fixDraft}
+                        onFixChange={setFixDraft}
+                        onRerun={() => void submitRerun(run)}
+                        rerunning={rerunning}
+                      />
+                    ) : null}
+                  </article>
                 );
               })}
             </div>
@@ -364,44 +381,76 @@ export function Board({
 
         {heldRuns.length && !preparing ? (
           <div className="held-list">
-            <p className="eyebrow">Held by agents · not on board</p>
-            <ul>
-              {heldRuns.map((run) => (
-                <li key={run.id}>
-                  <div>
-                    <strong>{run.patientName}</strong>
-                    <span className="muted">
-                      {run.status === "needs_fix"
-                        ? run.issues
-                            .filter((i) => i.severity === "error")
-                            .map((i) => i.code)
-                            .join(", ") || "needs fix"
-                        : run.gateReason || run.classifiedFlag || "filtered"}
-                    </span>
-                  </div>
-                  <span className={`chip ${run.status === "needs_fix" ? "warn" : ""}`}>
-                    {run.status.replaceAll("_", " ")}
-                  </span>
-                  <button type="button" className="btn ghost" onClick={() => openAgents(run)}>
-                    Agents
-                  </button>
-                </li>
-              ))}
-            </ul>
+            <button
+              type="button"
+              className="held-toggle"
+              onClick={() => setHeldOpen((v) => !v)}
+              aria-expanded={heldOpen}
+            >
+              <span className="eyebrow">Not on board</span>
+              <strong>
+                {heldRuns.filter((r) => r.status === "needs_fix").length} need fix ·{" "}
+                {heldRuns.filter((r) => r.status === "filtered").length} filtered
+              </strong>
+              <span className="held-chevron">{heldOpen ? "Hide" : "Show"}</span>
+            </button>
+            {heldOpen ? (
+              <div className="case-grid">
+                {heldRuns.map((run) => {
+                  const expanded = graphRunId === run.id;
+                  return (
+                    <article
+                      key={run.id}
+                      className={`case-block held ${run.status} ${expanded ? "expanded" : ""}`}
+                    >
+                      <div className={`case-row held-row ${run.status === "needs_fix" ? "breach" : ""}`}>
+                        <div className="case-row-main">
+                          <h3>{run.patientName}</h3>
+                          <p>{run.finding}</p>
+                          <div className="case-row-tags">
+                            <span className={`chip ${run.status === "needs_fix" ? "urgent" : "soon"}`}>
+                              {run.status.replaceAll("_", " ")}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="case-row-side">
+                          <p className="held-reason">
+                            {run.status === "needs_fix"
+                              ? run.issues
+                                  .filter((i) => i.severity === "error")
+                                  .map((i) => i.message)
+                                  .join(" · ") || "Fix data and re-run"
+                              : run.gateReason || "Filtered — no closed loop"}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="case-row-tools">
+                        <button
+                          type="button"
+                          className={`how-decided ${expanded ? "on" : ""}`}
+                          onClick={() => toggleAgents(run)}
+                          aria-expanded={expanded}
+                        >
+                          {expanded ? "Hide agent harness" : "How decided · agent harness"}
+                        </button>
+                      </div>
+                      {expanded ? (
+                        <AgentGraph
+                          run={run}
+                          fixDraft={fixDraft}
+                          onFixChange={setFixDraft}
+                          onRerun={() => void submitRerun(run)}
+                          rerunning={rerunning}
+                        />
+                      ) : null}
+                    </article>
+                  );
+                })}
+              </div>
+            ) : null}
           </div>
         ) : null}
       </div>
-
-      {graphRun ? (
-        <AgentGraph
-          run={graphRun}
-          onClose={() => setGraphRunId(null)}
-          fixDraft={fixDraft}
-          onFixChange={setFixDraft}
-          onRerun={() => void submitRerun(graphRun)}
-          rerunning={rerunning}
-        />
-      ) : null}
     </section>
   );
 }

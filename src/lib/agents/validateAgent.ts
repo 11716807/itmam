@@ -86,7 +86,41 @@ export function validateAgent(row: ImportRow): {
         message: `${result.labelEn} expects a number; got "${raw}"`,
         severity: "error",
       });
+    } else if (n != null) {
+      const ranges: Record<string, [number, number]> = {
+        hba1c: [3, 20],
+        ldl: [0.5, 15],
+        bmi: [10, 80],
+        moca: [0, 30],
+      };
+      const range = ranges[result.code];
+      if (range && (n < range[0] || n > range[1])) {
+        issues.push({
+          code: "value_out_of_range",
+          field: "value",
+          message: `${result.labelEn} ${n} is outside plausible range ${range[0]}–${range[1]}`,
+          severity: "error",
+        });
+      }
     }
+  }
+
+  if (raw && result.code === "fit" && !/pos|neg|detect|abnormal|normal/i.test(raw)) {
+    issues.push({
+      code: "invalid_fit_value",
+      field: "value",
+      message: `FIT value "${raw}" should be Positive / Negative`,
+      severity: "error",
+    });
+  }
+
+  if (raw && result.code === "vision" && !/fail|pass|abnormal|normal|refer/i.test(raw)) {
+    issues.push({
+      code: "invalid_vision_value",
+      field: "value",
+      message: `Vision value "${raw}" should be Passed / Failed`,
+      severity: "warn",
+    });
   }
 
   if (!result.recordedAt) {
