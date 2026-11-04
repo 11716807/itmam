@@ -1,15 +1,20 @@
 import { useState } from "react";
 import {
   AGENT_NODE_ORDER,
+  type AgentEditablePatch,
+  type AgentNodeId,
   type AgentNodeTrace,
   type AgentRun,
 } from "../lib/agents/types";
 
 type Props = {
   run: AgentRun;
-  /** Highlight the live node during streaming (optional). */
-  activeNodeId?: string | null;
-  compact?: boolean;
+  onClose?: () => void;
+  /** Optional fix form for needs_fix runs */
+  fixDraft?: AgentEditablePatch;
+  onFixChange?: (patch: AgentEditablePatch) => void;
+  onRerun?: () => void;
+  rerunning?: boolean;
 };
 
 function statusClass(status: AgentNodeTrace["status"]): string {
@@ -31,89 +36,197 @@ function statusClass(status: AgentNodeTrace["status"]): string {
   }
 }
 
-function preview(value: unknown): string {
+function pretty(value: unknown): string {
   if (value == null) return "—";
   if (typeof value === "string") return value;
   try {
-    const s = JSON.stringify(value);
-    return s.length > 160 ? `${s.slice(0, 160)}…` : s;
+    return JSON.stringify(value, null, 2);
   } catch {
     return String(value);
   }
 }
 
-export function AgentGraph({ run, activeNodeId, compact }: Props) {
-  const [openId, setOpenId] = useState<string | null>(null);
-  const byId = Object.fromEntries(run.nodes.map((n) => [n.id, n]));
+function decisionText(node: AgentNodeTrace): string {
+  if (node.notes) return node.notes;
+  const out = node.output;
+  if (out && typeof out === "object" && "gateReason" in (out as object)) {
+    return String((out as { gateReason?: string }).gateReason);
+  }
+  if (out && typeof out === "object" && "priorityReason" in (out as object)) {
+    return String((out as { priorityReason?: string }).priorityReason);
+  }
+  return statusClass(node.status);
+}
+
+function pathEdgeClass(
+  from: AgentNodeTrace | undefined,
+  to: AgentNodeTrace | undefined,
+): string {
+  if (!from || !to) return "pending";
+  if (from.status === "ok" || from.status === "warn") {
+    if (to.status === "skipped") return "cut";
+    if (to.status === "blocked" || to.status === "filtered") return to.status;
+    if (to.status === "ok" || to.status === "warn") return "green";
+  }
+  return "pending";
+}
+
+export function AgentGraph({
+  run,
+  onClose,
+  fixDraft,
+  onFixChange,
+  onRerun,
+  rerunning,
+}: Props) {
+  const [selectedId, setSelectedId] = useState<AgentNodeId | null>("ingest");
+  const byId = Object.fromEntries(run.nodes.map((n) => [n.id, n])) as Partial<
+    Record<AgentNodeId, AgentNodeTrace>
+  >;
+  const selected = selectedId ? byId[selectedId] : undefined;
 
   return (
-    <div className={`agent-graph ${compact ? "compact" : ""}`}>
-      <div className="agent-graph-head">
-        <div>
-          <p className="eyebrow">Agent pipeline</p>
-          <strong>
-            {run.patientName} · {run.finding}
-          </strong>
-          <p className="muted agent-graph-status">
-            Outcome: <span className={`agent-pill ${run.status}`}>{run.status.replace("_", " ")}</span>
-            {run.explainEn ? ` — ${run.explainEn}` : null}
-          </p>
-        </div>
-      </div>
-
-      {run.issues.length ? (
-        <ul className="agent-issue-list">
-          {run.issues.map((issue) => (
-            <li key={`${issue.code}-${issue.field}`} className={issue.severity}>
-              <span className="agent-tag">{issue.code}</span>
-              <span>
-                <strong>{issue.field}</strong>: {issue.message}
+    <div className="agent-modal" role="dialog" aria-modal="true" aria-label="Agent graph">
+      <div className="agent-modal-card">
+        <header className="agent-modal-head">
+          <div>
+            <p className="eyebrow">Agent graph</p>
+            <h3>
+              {run.patientName} · {run.finding}
+            </h3>
+            <p className="muted">
+              Outcome:{" "}
+              <span className={`agent-pill ${run.status}`}>
+                {run.status.replaceAll("_", " ")}
               </span>
-            </li>
-          ))}
-        </ul>
-      ) : null}
+              {" · "}
+              Click a node to inspect input, decision, and output. Green path = successful flow.
+            </p>
+          </div>
+          {onClose ? (
+            <button type="button" className="btn ghost" onClick={onClose}>
+              Close
+            </button>
+          ) : null}
+        </header>
 
-      <ol className="agent-node-rail" aria-label="Agent nodes">
-        {AGENT_NODE_ORDER.map((id) => {
-          const node = byId[id];
-          const status = node?.status || (activeNodeId === id ? "running" : "pending");
-          const isOpen = openId === id;
-          return (
-            <li
-              key={id}
-              className={`agent-node ${statusClass(status)} ${activeNodeId === id ? "live" : ""}`}
+        {run.issues.length ? (
+          <ul className="agent-issue-list">
+            {run.issues.map((issue) => (
+              <li key={`${issue.code}-${issue.field}`} className={issue.severity}>
+                <span className="agent-tag">{issue.code}</span>
+                <span>
+                  <strong>{issue.field}</strong>: {issue.message}
+                </span>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+
+        <div className="agent-path" aria-label="Agent data flow">
+          {AGENT_NODE_ORDER.map((id, index) => {
+            const node = byId[id];
+            const status = node?.status || "pending";
+            const nextId = AGENT_NODE_ORDER[index + 1];
+            const next = nextId ? byId[nextId] : undefined;
+            const edge = nextId ? pathEdgeClass(node, next) : null;
+            return (
+              <div key={id} className="agent-path-item">
+                <button
+                  type="button"
+                  className={`agent-path-node ${statusClass(status)} ${selectedId === id ? "selected" : ""}`}
+                  onClick={() => setSelectedId(id)}
+                >
+                  <span className="agent-path-dot" aria-hidden />
+                  <span className="agent-path-label">{node?.label || id}</span>
+                  <span className="agent-path-state">{status}</span>
+                </button>
+                {edge ? (
+                  <div className={`agent-path-edge ${edge}`} aria-hidden>
+                    <span />
+                  </div>
+                ) : null}
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="agent-inspect">
+          {selected ? (
+            <>
+              <div className="agent-inspect-head">
+                <p className="eyebrow">{selected.label} · {selected.status}</p>
+                <strong>Decision</strong>
+                <p>{decisionText(selected)}</p>
+              </div>
+              <div className="agent-inspect-grid">
+                <section>
+                  <p className="eyebrow">Input</p>
+                  <pre>{pretty(selected.input)}</pre>
+                </section>
+                <section>
+                  <p className="eyebrow">Output</p>
+                  <pre>{pretty(selected.output)}</pre>
+                </section>
+              </div>
+            </>
+          ) : (
+            <p className="muted">Select a node on the green path to inspect data flow.</p>
+          )}
+        </div>
+
+        {run.status === "needs_fix" && fixDraft && onFixChange && onRerun ? (
+          <div className="agent-fix-panel">
+            <p className="eyebrow">Fix tagged fields · re-run agents</p>
+            <div className="agent-fix-grid">
+              <label className="field">
+                Value
+                <input
+                  value={fixDraft.value ?? ""}
+                  onChange={(e) => onFixChange({ ...fixDraft, value: e.target.value })}
+                  placeholder="e.g. 168/102"
+                />
+              </label>
+              <label className="field">
+                Name
+                <input
+                  value={fixDraft.name_en ?? ""}
+                  onChange={(e) => onFixChange({ ...fixDraft, name_en: e.target.value })}
+                />
+              </label>
+              <label className="field">
+                Age
+                <input
+                  value={fixDraft.age ?? ""}
+                  onChange={(e) => onFixChange({ ...fixDraft, age: e.target.value })}
+                />
+              </label>
+              <label className="field">
+                Days waiting
+                <input
+                  value={fixDraft.days_waiting ?? ""}
+                  onChange={(e) =>
+                    onFixChange({ ...fixDraft, days_waiting: e.target.value })
+                  }
+                />
+              </label>
+            </div>
+            <button
+              type="button"
+              className="btn primary"
+              disabled={rerunning}
+              onClick={onRerun}
             >
-              <button
-                type="button"
-                className="agent-node-btn"
-                onClick={() => setOpenId(isOpen ? null : id)}
-              >
-                <span className="agent-node-label">{node?.label || id}</span>
-                <span className="agent-node-state">{status}</span>
-              </button>
-              {node?.notes ? <p className="agent-node-notes">{node.notes}</p> : null}
-              {isOpen && node ? (
-                <div className="agent-node-io">
-                  <p>
-                    <span className="eyebrow">Input</span>
-                    <code>{preview(node.input)}</code>
-                  </p>
-                  <p>
-                    <span className="eyebrow">Output</span>
-                    <code>{preview(node.output)}</code>
-                  </p>
-                </div>
-              ) : null}
-            </li>
-          );
-        })}
-      </ol>
+              {rerunning ? "Re-running…" : "Re-run agents"}
+            </button>
+          </div>
+        ) : null}
+      </div>
     </div>
   );
 }
 
-/** Compact strip used on Case — opens full graph via callback. */
+/** Case screen opener — opens the same modal graph. */
 export function AgentGraphStrip({
   run,
   onOpen,
@@ -123,12 +236,11 @@ export function AgentGraphStrip({
 }) {
   return (
     <button type="button" className="agent-strip" onClick={onOpen}>
-      <span className="eyebrow">How agents decided</span>
-      <strong>
-        {run.nodes.filter((n) => n.status === "ok" || n.status === "warn").length}/
-        {run.nodes.length} nodes · {run.status.replace("_", " ")}
-      </strong>
-      <span className="muted">{run.priorityReason || run.gateReason || run.explainEn || "View graph"}</span>
+      <span className="eyebrow">Agents</span>
+      <strong>View agent graph</strong>
+      <span className="muted">
+        {run.status.replaceAll("_", " ")} · green path · click nodes for I/O
+      </span>
     </button>
   );
 }

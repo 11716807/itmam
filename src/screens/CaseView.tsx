@@ -360,10 +360,13 @@ export function CaseView(props: Props) {
             <div className="case-agent-block">
               <AgentGraphStrip
                 run={props.agentRun}
-                onOpen={() => setShowAgentGraph((v) => !v)}
+                onOpen={() => setShowAgentGraph(true)}
               />
-              {showAgentGraph ? <AgentGraph run={props.agentRun} compact /> : null}
             </div>
+          ) : null}
+
+          {showAgentGraph && props.agentRun ? (
+            <AgentGraph run={props.agentRun} onClose={() => setShowAgentGraph(false)} />
           ) : null}
 
           <div className="split">
