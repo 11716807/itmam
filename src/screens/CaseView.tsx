@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { AgentGraph, AgentGraphStrip } from "../components/AgentGraph";
 import { CareTimeline } from "../components/CareTimeline";
 import { CaseAsk } from "../components/CaseAsk";
+import { LoopAssistBar } from "../components/LoopAssist";
 import type { AgentRun } from "../lib/agents/types";
 import {
   clinicianById,
@@ -29,6 +30,7 @@ import {
   tellPatient,
   verifyOutcome,
 } from "../lib/loop";
+import { buildLoopAssist } from "../lib/loopAssist";
 import { canVerify, confirmatorySpecialty, referralOf } from "../lib/pathway";
 import { planSlaRecovery } from "../lib/slaAction";
 import { translateMessage } from "../lib/translate";
@@ -73,6 +75,7 @@ export function CaseView(props: Props) {
   const [confirmNote, setConfirmNote] = useState(props.care.referral?.note ?? "");
   const [showLost, setShowLost] = useState(false);
   const [showAgentGraph, setShowAgentGraph] = useState(false);
+  const assistSeeded = useRef<string>("");
   const [showReschedule, setShowReschedule] = useState(false);
   const [draft, setDraft] = useState("");
   const [composeLang, setComposeLang] = useState<string>("en");
@@ -100,6 +103,8 @@ export function CaseView(props: Props) {
     [props.care.specialty, patient.network],
   );
 
+  const assist = useMemo(() => buildLoopAssist(props.care), [props.care]);
+
   useEffect(() => {
     setVisitNote(props.care.visitNote ?? "");
     setOwnerId(props.care.ownerId ?? "");
@@ -108,6 +113,7 @@ export function CaseView(props: Props) {
     setConfirmNote(props.care.referral?.note ?? "");
     setShowLost(false);
     setShowReschedule(false);
+    assistSeeded.current = "";
   }, [
     props.care.id,
     props.care.stage,
@@ -118,6 +124,22 @@ export function CaseView(props: Props) {
     props.care.referral?.note,
     props.care.referral?.branch,
   ]);
+
+  // Quiet prefill — only once per stage enter, never fight the coordinator.
+  useEffect(() => {
+    const key = `${props.care.id}:${props.care.stage}`;
+    if (assistSeeded.current === key) return;
+    const next = buildLoopAssist(props.care);
+    if (props.care.stage === "told" && next.ownerId && !props.care.ownerId) {
+      setOwnerId(next.ownerId);
+      assistSeeded.current = key;
+    } else if (props.care.stage === "owned" && next.slotId && !props.care.slotId) {
+      setSlotId(next.slotId);
+      assistSeeded.current = key;
+    } else if (props.care.stage === "stratified" || props.care.stage === "result_in") {
+      assistSeeded.current = key;
+    }
+  }, [props.care, owners, slots]);
 
   useEffect(() => {
     draftLocked.current = false;
@@ -275,32 +297,33 @@ export function CaseView(props: Props) {
   const slaPlan = planSlaRecovery(props.care, result);
   const caseMessages = props.messages.filter((m) => m.caseId === props.care.id);
   const findingLine = `${result.labelEn} ${result.value}${result.unit ? ` ${result.unit}` : ""}`;
-  const nextLabel =
-    stage === "result_in"
-      ? "Confirm priority"
-      : stage === "stratified"
-        ? "Tell patient"
-        : stage === "told"
-          ? "Patient can book · assign visit clinician"
-          : stage === "owned"
-            ? noShows > 0
-              ? `Rebook after no-show ×${noShows}`
-              : "Book visit (or wait for patient)"
-            : stage === "booked"
-              ? "Record visit · or mark no-show"
-              : stage === "seen"
-                ? refPath.branch === "undecided"
-                  ? "Choose: close or refer"
-                  : refPath.branch === "direct_close"
-                    ? "Verify outcome"
-                    : !refPath.bookedAt
-                      ? "Book confirmatory visit"
-                      : !refPath.doneAt
-                        ? "Mark confirmatory done"
-                        : "Verify after referral"
-                : stage === "verified"
-                  ? "Loop closed"
-                  : "Lost to follow-up";
+  const nextLabel = assist.actionLabel;
+
+  const assistApply =
+    stage === "stratified" && assist.draftMessage
+      ? {
+          label: "Use draft",
+          disabled: false,
+          run: () => {
+            draftLocked.current = true;
+            setDraft(assist.draftMessage || "");
+            setComposeLang("en");
+            setTranslateNote("Assist draft applied — edit before send");
+          },
+        }
+      : stage === "told" && assist.ownerId
+        ? {
+            label: "Use suggested owner",
+            disabled: ownerId === assist.ownerId,
+            run: () => setOwnerId(assist.ownerId || ""),
+          }
+        : stage === "owned" && assist.slotId
+          ? {
+              label: "Use suggested slot",
+              disabled: slotId === assist.slotId,
+              run: () => setSlotId(assist.slotId || ""),
+            }
+          : null;
 
   return (
     <section className="panel">
@@ -324,7 +347,7 @@ export function CaseView(props: Props) {
             </span>
             <span className={`chip ${props.care.urgency}`}>{props.care.urgency}</span>
             <span className="case-next-pill">
-              Next · {nextLabel}
+              Assist · {nextLabel}
             </span>
           </div>
         </div>
@@ -340,7 +363,7 @@ export function CaseView(props: Props) {
           <div className={`sla-case-banner ${slaPlan.status}`} role="alert">
             <div>
               <p className="eyebrow">
-                AI · SLA {slaPlan.status === "breached" ? "recovery" : "watch"}
+                Assist · SLA {slaPlan.status === "breached" ? "recovery" : "watch"}
               </p>
               <strong>{slaPlan.actionLabel}</strong>
               <p>{slaPlan.verdict}</p>
@@ -372,6 +395,15 @@ export function CaseView(props: Props) {
                   <h3>{nextLabel}</h3>
                 </div>
               </div>
+
+              {open || stage === "verified" || stage === "lost" ? (
+                <LoopAssistBar
+                  assist={assist}
+                  applyLabel={assistApply?.label}
+                  applyDisabled={assistApply?.disabled}
+                  onApply={assistApply ? () => assistApply.run() : undefined}
+                />
+              ) : null}
 
               <ol className="action-progress">
                 {FLOW.map((step) => {
@@ -502,6 +534,7 @@ export function CaseView(props: Props) {
                       {owners.map((c) => (
                         <option key={c.id} value={c.id}>
                           {c.nameEn} · {specialtyLabel(c.specialty)} · {c.facility}
+                          {assist.ownerId === c.id ? " · suggested" : ""}
                         </option>
                       ))}
                     </select>
@@ -553,6 +586,7 @@ export function CaseView(props: Props) {
                         return (
                           <option key={s.id} value={s.id}>
                             {s.when.replace("T", " ")} · {c.nameEn}
+                            {assist.slotId === s.id ? " · suggested" : ""}
                           </option>
                         );
                       })}
@@ -683,13 +717,25 @@ export function CaseView(props: Props) {
                         {specialtyLabel(confirmatorySpecialty(result.code))}) then return to verify.
                       </p>
                       <div className="path-decide">
-                        <button type="button" className="path-decide-card direct" onClick={runLineA}>
-                          <span className="eyebrow">Continue</span>
+                        <button
+                          type="button"
+                          className={`path-decide-card direct ${assist.outcome === "direct_close" ? "suggested" : ""}`}
+                          onClick={runLineA}
+                        >
+                          <span className="eyebrow">
+                            Continue{assist.outcome === "direct_close" ? " · assist" : ""}
+                          </span>
                           <strong>Close without referral</strong>
                           <p>Stay on the main path → verify.</p>
                         </button>
-                        <button type="button" className="path-decide-card branch" onClick={runLineB}>
-                          <span className="eyebrow">Branch</span>
+                        <button
+                          type="button"
+                          className={`path-decide-card branch ${assist.outcome === "confirmatory" ? "suggested" : ""}`}
+                          onClick={runLineB}
+                        >
+                          <span className="eyebrow">
+                            Branch{assist.outcome === "confirmatory" ? " · assist" : ""}
+                          </span>
                           <strong>Confirmatory referral</strong>
                           <p>
                             Branch to {specialtyLabel(confirmatorySpecialty(result.code))} → book →

@@ -11,6 +11,7 @@ import { parseImportCsv, SAMPLE_IMPORT_CSV, type ImportRow } from "../lib/import
 import { hoursOpen, isOpen, slaBreached } from "../lib/loop";
 import { rankCases } from "../lib/priority";
 import { resetRegistry, upsertPatient, upsertResult } from "../lib/registry";
+import { buildLoopAssist } from "../lib/loopAssist";
 import { planSlaRecovery } from "../lib/slaAction";
 import type { RiskWeights } from "../lib/riskWeights";
 import type { CareCase, ScreeningResult } from "../types";
@@ -51,6 +52,11 @@ export function Board({
   const [graphRunId, setGraphRunId] = useState<string | null>(null);
   const [fixDraft, setFixDraft] = useState<AgentEditablePatch>({});
   const [rerunning, setRerunning] = useState(false);
+  const [rerunFocus, setRerunFocus] = useState(0);
+  const [revealThrough, setRevealThrough] = useState<AgentRun["nodes"][number]["id"] | null>(
+    null,
+  );
+  const [liveRerun, setLiveRerun] = useState<AgentRun | null>(null);
   const [heldOpen, setHeldOpen] = useState(false);
 
   const resultsById = Object.fromEntries(
@@ -138,22 +144,62 @@ export function Board({
     await runPrepare(rows, "sample-ifhas-extract.csv");
   }
 
+  function scrollToRun(runId: string) {
+    window.requestAnimationFrame(() => {
+      document
+        .querySelector(`[data-agent-run="${runId}"]`)
+        ?.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+  }
+
   async function submitRerun(run: AgentRun) {
-    setRerunning(true);
     setError(null);
+    setHeldOpen(true);
+    setGraphRunId(run.id);
+    setFixDraft((current) => ({
+      value: current.value ?? run.editablePatch?.value ?? run.rawRow.result.value,
+      name_en: current.name_en ?? run.editablePatch?.name_en ?? run.rawRow.patient.nameEn,
+      age: current.age ?? run.editablePatch?.age ?? String(run.rawRow.patient.age),
+      days_waiting: current.days_waiting ?? (run.rawRow.metrics.days_waiting || ""),
+      notes: current.notes ?? (run.rawRow.metrics.notes || ""),
+    }));
+    setRevealThrough(null);
+    setLiveRerun(null);
+    setRerunning(true);
+    setRerunFocus((n) => n + 1);
+    scrollToRun(run.id);
+
     try {
       upsertPatient(run.rawRow.patient);
       upsertResult(run.rawRow.result);
       const result = await rerunAgentWithPatch(run, fixDraft);
       upsertPatient(result.run.rawRow.patient);
       upsertResult(result.run.rawRow.result);
+
+      // Show the new harness path node-by-node before swapping board state.
+      setLiveRerun(result.run);
+      for (const node of result.run.nodes) {
+        setRevealThrough(node.id);
+        await new Promise((r) => window.setTimeout(r, 120));
+      }
+
       onReplaceAgentRun(result.run, result.care);
       setGraphRunId(result.run.id);
+      setRevealThrough(null);
+      setLiveRerun(null);
+      setRerunning(false);
+      setRerunFocus((n) => n + 1);
+      window.setTimeout(() => scrollToRun(result.run.id), 120);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Re-run failed");
-    } finally {
+      setRevealThrough(null);
+      setLiveRerun(null);
       setRerunning(false);
     }
+  }
+
+  function graphFor(run: AgentRun): AgentRun {
+    return liveRerun && liveRerun.id === run.id ? liveRerun : run;
   }
 
   const fileInput = (
@@ -304,6 +350,7 @@ export function Board({
                 const patient = patientById(row.patientId);
                 const result = resultById(row.resultId);
                 const sla = planSlaRecovery(row, result);
+                const assist = buildLoopAssist(row);
                 const run = runForCase(row);
                 const expanded = Boolean(run && graphRunId === run.id);
                 return (
@@ -347,7 +394,7 @@ export function Board({
                         {sla.status !== "ok" ? (
                           <p className="sla-row-action">{sla.actionLabel}</p>
                         ) : (
-                          <p className="case-cta">Open case →</p>
+                          <p className="case-cta">{assist.boardLine} →</p>
                         )}
                       </div>
                     </button>
@@ -365,11 +412,15 @@ export function Board({
                     ) : null}
                     {expanded && run ? (
                       <AgentGraph
-                        run={run}
+                        run={graphFor(run)}
                         fixDraft={fixDraft}
                         onFixChange={setFixDraft}
                         onRerun={() => void submitRerun(run)}
-                        rerunning={rerunning}
+                        rerunning={rerunning && graphRunId === run.id}
+                        focusToken={graphRunId === run.id ? rerunFocus : 0}
+                        revealThrough={
+                          rerunning && graphRunId === run.id ? revealThrough : null
+                        }
                       />
                     ) : null}
                   </article>
@@ -436,11 +487,15 @@ export function Board({
                       </div>
                       {expanded ? (
                         <AgentGraph
-                          run={run}
+                          run={graphFor(run)}
                           fixDraft={fixDraft}
                           onFixChange={setFixDraft}
                           onRerun={() => void submitRerun(run)}
-                          rerunning={rerunning}
+                          rerunning={rerunning && graphRunId === run.id}
+                          focusToken={graphRunId === run.id ? rerunFocus : 0}
+                          revealThrough={
+                            rerunning && graphRunId === run.id ? revealThrough : null
+                          }
                         />
                       ) : null}
                     </article>

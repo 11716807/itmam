@@ -153,7 +153,7 @@ export type AppScreen =
   | "patient"
   | "outcomes"
   | "audit"
-  | "rules";
+  | "rules"
 
 export const STAGE_ORDER: LoopStage[] = [
   "result_in",
