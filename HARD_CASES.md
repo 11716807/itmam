@@ -3,7 +3,7 @@
 Named test suite for demos, EVAL.md, and the demo video.  
 **Data:** 100% synthetic IFHAS/EAS-shaped rows in `public/sample-ifhas-extract.csv`.
 
-**Locked framing:** We help care coordinators close IFHAS/EAS actionable screening results — told → owned → booked → seen → verified — using a rules-first multi-agent import harness with visible guardrails; Gemini only narrates.
+**Locked framing:** We help care coordinators close IFHAS/EAS actionable screening results — told → owned → booked → seen → verified — using a rules-first multi-agent import harness with visible guardrails; assist agents narrate and suggest — humans confirm.
 
 Full scores: [EVAL.md](./EVAL.md) · Replay: `npx tsx scripts/run-eval.mjs`
 

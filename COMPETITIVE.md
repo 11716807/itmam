@@ -1,6 +1,6 @@
 # Itmam — Competitive & landscape analysis
 
-**One-liner:** We help care coordinators close IFHAS/EAS actionable screening results — told → owned → booked → seen → verified — using a rules-first multi-agent import harness with visible guardrails; Gemini only narrates.
+**One-liner:** We help care coordinators close IFHAS/EAS actionable screening results — told → owned → booked → seen → verified — using a rules-first multi-agent import harness with visible guardrails; assist agents narrate and suggest — humans confirm.
 
 Reviewers compare prototypes to what exists. This note states that comparison explicitly.
 
@@ -34,7 +34,7 @@ Abu Dhabi already **detects** at scale (IFHAS / EAS). Orphan risk appears **afte
 | **Input** | Raw IFHAS/EAS-shaped extract (+ waiting / no-show / wearable flags) |
 | **Decision path** | Named agents with guardrails; every hop inspectable |
 | **Honesty** | Filtered & needs_fix stay on board trays — never silent drop |
-| **LLM posture** | Rules decide urgency/SLA/specialty; Gemini narrates / translates |
+| **Agent posture** | Rules decide urgency/SLA/specialty; assist agents narrate / translate / suggest (confirm-first) |
 | **Outcome** | Told → owned → booked → visit completed → verified (+ lost with reason) |
 | **Evidence** | Offline hard pack: Validate / Gate / Priority **100%** (see EVAL.md) |
 

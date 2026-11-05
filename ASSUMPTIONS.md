@@ -2,7 +2,7 @@
 
 Required submission note for the Future Health Digital Innovation Challenge.
 
-**One-liner:** We help care coordinators close IFHAS/EAS actionable screening results — told → owned → booked → seen → verified — using a rules-first multi-agent import harness with visible guardrails; Gemini only narrates.
+**One-liner:** We help care coordinators close IFHAS/EAS actionable screening results — told → owned → booked → seen → verified — using a rules-first multi-agent import harness with visible guardrails; assist agents narrate and suggest — humans confirm.
 
 ---
 
@@ -15,7 +15,7 @@ Required submission note for the Future Health Digital Innovation Challenge.
 5. **Insurance networks.** Visit slots can be filtered by patient network (demo uses seeded slots).
 6. **Messaging.** Coordinators compose and send patient messages (English default; optional translate). Sending is human-initiated — no silent auto-booking.
 7. **Shared demo state.** Firestore holds a shared board so judges see the same cases without re-import.
-8. **LLM role.** Gemini assists briefs/translation/narration only. Urgency, SLA, specialty, gate, and route are rules-first.
+8. **Assist-agent role.** Loop-assist and explain agents draft briefs, translation, narration, and confirm-first suggestions. Urgency, SLA, specialty, gate, and route stay rules-first.
 
 ---
 
@@ -40,7 +40,7 @@ Required submission note for the Future Health Digital Innovation Challenge.
 |---|---|---|---|---|
 | `public/sample-ifhas-extract.csv` / `SAMPLE_IMPORT_CSV` | Synthetic screening extract | Team Itmam | Non-PHI fictional persons | Team-authored for hackathon demo/eval |
 | Seed clinicians & slots | Synthetic | Team Itmam | Non-PHI | Team-authored |
-| Gemini API | Model inference | Google (via key) | Prompt may include demo case text | Used under team API key; narrate/translate only |
+| Assist agent API | Inference for narrate / translate / loop suggest | Team key | Prompt may include demo case text | Confirm-first suggestions only |
 
 **Synthetic share in demo dataset: 100%.**
 
@@ -51,7 +51,7 @@ Path to real data: DOH-approved IFHAS/EAS extracts under a data-processing agree
 ## Responsible AI, safety & governance
 
 - **Human in the loop:** Confirm priority, send message, assign clinician, book/verify — all require coordinator action.
-- **Guardrails per agent:** No invent on ingest; validate hard-fail; enrich rules-only / no diagnosis; gate no silent drop; priority rules beat model; route never places bad data; explain narrate-only.
+- **Guardrails per agent:** No invent on ingest; validate hard-fail; enrich rules-only / no diagnosis; gate no silent drop; priority rules-first; route never places bad data; explain narrate-only.
 - **Explainability:** Agent harness shows input → decision → output and guardrail held/applied/breached.
 - **Failure honesty:** Needs-fix and filtered trays; lost-to-follow-up requires a reason.
 - **Bias / fairness:** Ranking uses clinical pathway signals + delay/no-show metrics — not demographics as priority features. Age/sex are identity context only.

@@ -143,7 +143,7 @@ export function CaseView(props: Props) {
               : "outcomeGate",
       stage: props.care.stage,
       status: "loading",
-      detail: "Loop agent thinking…",
+      detail: "Agent working…",
       guardrails: [],
     });
 
@@ -201,7 +201,7 @@ export function CaseView(props: Props) {
       !draftLocked.current
     ) {
       setDraft(assist.draftMessage);
-      setTranslateNote("LLM draft tell ready — edit before send");
+      setTranslateNote("Agent draft ready — edit before send");
     }
   }, [props.care.stage, assist.draftMessage, assist.llmStatus]);
 

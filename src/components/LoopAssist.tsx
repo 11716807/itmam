@@ -13,7 +13,7 @@ type Props = {
 };
 
 /**
- * Loop-assist strip with LLM agent status + suggested pick.
+ * Loop-assist strip with agent status + suggested pick.
  */
 export function LoopAssistBar({
   assist,
@@ -34,14 +34,14 @@ export function LoopAssistBar({
       <div className="loop-assist-main">
         <p className="eyebrow">
           Assist · {AGENT_LABEL[assist.agent]}
-          {loading ? " · thinking" : ""}
+          {loading ? " · working" : ""}
         </p>
         <p className="loop-assist-reason">{assist.reason}</p>
         {loading ? (
           <div className="assist-pick assist-pick-loading" aria-live="polite">
             <span className="assist-pick-badge">Agent</span>
             <div className="assist-pick-copy">
-              <strong>Ranking roster with guardrails…</strong>
+              <strong>Agent ranking roster with guardrails…</strong>
               <p className="assist-pick-why">Suggestions stay confirm-first — nothing auto-applies.</p>
             </div>
           </div>
@@ -57,7 +57,7 @@ export function LoopAssistBar({
         ) : null}
         {!loading && blocked ? (
           <p className="assist-guardrail-note muted">
-            Guardrails held the model pick — choose manually from the list below.
+            Guardrails held the agent suggestion — choose manually from the list below.
           </p>
         ) : null}
         <ol className="loop-assist-steps" aria-label="Loop assist path">

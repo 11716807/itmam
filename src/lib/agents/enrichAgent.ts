@@ -1,7 +1,7 @@
 import { enrichRow, type Enrichment } from "../enrich";
 import type { ImportRow } from "../importCsv";
 
-/** Enrichment agent — signals + classify finding (rules, not LLM). */
+/** Enrichment agent — signals + classify finding (deterministic rules). */
 export function enrichAgent(row: ImportRow): {
   enrichment: Enrichment;
   notes: string;

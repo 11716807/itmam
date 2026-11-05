@@ -169,7 +169,7 @@ export async function runLoopAgent(care: CareCase): Promise<LoopAgentSuggestion>
         stage: care.stage,
         model: api.model,
         status: "blocked",
-        detail: "Guardrails blocked the model pick — choose manually from the roster.",
+        detail: "Guardrails blocked the agent suggestion — choose manually from the roster.",
         why: pick.why,
         guardrails: checks,
       };
@@ -243,7 +243,7 @@ export async function runLoopAgent(care: CareCase): Promise<LoopAgentSuggestion>
       stage: care.stage,
       model: api.model,
       status: "blocked",
-      detail: "Model returned an incomplete pick — choose manually.",
+      detail: "Agent returned an incomplete suggestion — choose manually.",
       guardrails: checks,
     };
   } catch (error) {

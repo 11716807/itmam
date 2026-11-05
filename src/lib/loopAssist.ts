@@ -37,7 +37,7 @@ export type LoopAssist = {
   outcomeLabel?: string;
   outcomeWhy?: string;
   steps: LoopAssistStep[];
-  /** LLM / guardrail status for the active agent. */
+  /** Agent / guardrail status for the active assist step. */
   llmStatus?: LoopAgentSuggestion["status"];
   llmModel?: string;
   llmDetail?: string;
@@ -92,7 +92,7 @@ function stepsFor(stage: LoopStage): LoopAssistStep[] {
 
 /**
  * Sync scaffold for stage labels / step rail. Picks (owner, slot, draft, outcome)
- * come from LLM loop agents via mergeLoopSuggestion — never hardcoded rankings.
+ * come from loop agents via mergeLoopSuggestion — never hardcoded rankings.
  */
 export function buildLoopAssist(care: CareCase): LoopAssist {
   const result = resultById(care.resultId);
@@ -191,7 +191,7 @@ export function buildLoopAssist(care: CareCase): LoopAssist {
   };
 }
 
-/** Merge a completed (or failed) LLM loop-agent result into the sync scaffold. */
+/** Merge a completed (or failed) loop-agent result into the sync scaffold. */
 export function mergeLoopSuggestion(
   base: LoopAssist,
   suggestion: LoopAgentSuggestion | null,

@@ -25,7 +25,7 @@ export const AGENT_GUARDRAILS: Record<AgentNodeId, AgentGuardrailDef[]> = {
     { id: "tag_fields", rule: "Every issue must name field + code for re-run" },
   ],
   enrich: [
-    { id: "rules_only", rule: "Classify with deterministic rules — no LLM" },
+    { id: "rules_only", rule: "Classify with deterministic rules only" },
     { id: "no_diagnosis", rule: "Do not diagnose or prescribe from a screening value" },
     { id: "signal_bound", rule: "Signals come only from extract metrics + finding code" },
   ],
@@ -35,7 +35,7 @@ export const AGENT_GUARDRAILS: Record<AgentNodeId, AgentGuardrailDef[]> = {
     { id: "reason_required", rule: "Every filter must carry an explicit gate reason" },
   ],
   priority: [
-    { id: "rules_beat_model", rule: "Urgency / SLA / specialty come from rules only" },
+    { id: "rules_only_rank", rule: "Urgency / SLA / specialty come from rules only" },
     { id: "no_diagnosis", rule: "Priority language is coordination, not diagnosis" },
     { id: "sla_bounded", rule: "SLA hours must be a positive finite number" },
   ],
@@ -47,7 +47,7 @@ export const AGENT_GUARDRAILS: Record<AgentNodeId, AgentGuardrailDef[]> = {
   explain: [
     { id: "narrate_only", rule: "Narrate decisions — never change rank or stage" },
     { id: "no_diagnosis", rule: "Do not diagnose, prescribe, or invent clinical advice" },
-    { id: "rules_first", rule: "State that rules decided; model only explains" },
+    { id: "rules_first", rule: "State that rules decided; explain agent only narrates" },
   ],
 };
 

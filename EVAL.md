@@ -1,6 +1,6 @@
 # Itmam — Evaluation & benchmark report
 
-**One-liner:** We help care coordinators close IFHAS/EAS actionable screening results — told → owned → booked → seen → verified — using a rules-first multi-agent import harness with visible guardrails; Gemini only narrates.
+**One-liner:** We help care coordinators close IFHAS/EAS actionable screening results — told → owned → booked → seen → verified — using a rules-first multi-agent import harness with visible guardrails; assist agents narrate and suggest — humans confirm.
 
 **Eval date:** 2026-11-04  
 **Harness version:** main (`scripts/run-eval.mjs`)  
@@ -84,7 +84,7 @@ npx tsx scripts/run-eval.mjs
 
 ### Priority Agent
 - Urgency / SLA / specialty from deterministic enrichment rules
-- Gemini does **not** set urgency
+- Assist agents do **not** set urgency
 - Scored on FIT Positive + BP 168/102 → `urgent`
 
 ### Route Agent (destination)
@@ -108,4 +108,4 @@ npx tsx scripts/run-eval.mjs
 
 ## Demo video talking points (30 sec)
 
-> “On this 12-row hard pack — including wrong BP text, missing HbA1c, borderline and normal rows — Validate, Gate, and Priority each score 100%. Filtered and needs-fix stay visible. Rules decide; Gemini only narrates.”
+> “On this 12-row hard pack — including wrong BP text, missing HbA1c, borderline and normal rows — Validate, Gate, and Priority each score 100%. Filtered and needs-fix stay visible. Rules decide; assist agents narrate — humans confirm.”
