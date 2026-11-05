@@ -1,8 +1,7 @@
-import { clinicianById, patientById, resultById } from "../data/seed";
-import type { CareCase, Clinician, LoopStage, ScreeningResult, Slot } from "../types";
-import { localBrief } from "./ai";
-import { compatibleSlots, hoursOpen, ownerCandidates } from "./loop";
-import { confirmatorySpecialty, referralOf } from "./pathway";
+import { resultById } from "../data/seed";
+import type { CareCase, LoopStage } from "../types";
+import type { LoopAgentSuggestion } from "./loopAgents/types";
+import { hoursOpen } from "./loop";
 import { planSlaRecovery } from "./slaAction";
 
 export type LoopAssistAgentId =
@@ -27,12 +26,21 @@ export type LoopAssist = {
   draftMessage?: string;
   ownerId?: string;
   ownerLabel?: string;
+  /** One-line why this clinician was ranked first. */
+  ownerWhy?: string;
   slotId?: string;
   slotLabel?: string;
+  /** One-line why this slot was ranked first. */
+  slotWhy?: string;
   /** Recommended pathway when stage is seen. */
   outcome?: "direct_close" | "confirmatory" | "verify";
   outcomeLabel?: string;
+  outcomeWhy?: string;
   steps: LoopAssistStep[];
+  /** LLM / guardrail status for the active agent. */
+  llmStatus?: LoopAgentSuggestion["status"];
+  llmModel?: string;
+  llmDetail?: string;
 };
 
 const AGENT_ORDER: LoopAssistAgentId[] = [
@@ -82,79 +90,11 @@ function stepsFor(stage: LoopStage): LoopAssistStep[] {
   }));
 }
 
-function pickOwner(care: CareCase): {
-  owner?: Clinician;
-} {
-  const patient = patientById(care.patientId);
-  const list = ownerCandidates(care.specialty, patient.network);
-  if (!list.length) return {};
-  // Prefer exact specialty match, then first on network.
-  const exact = list.find((c) => c.specialty === care.specialty);
-  return { owner: exact || list[0] };
-}
-
-function pickSlot(
-  care: CareCase,
-  ownerId?: string | null,
-): { slot?: Slot; clinician?: Clinician } {
-  const patient = patientById(care.patientId);
-  const slots = compatibleSlots(care.specialty, patient.network, ownerId || care.ownerId);
-  if (!slots.length) return {};
-  // Earliest chronologically.
-  const sorted = [...slots].sort((a, b) => a.when.localeCompare(b.when));
-  const slot = sorted[0];
-  return { slot, clinician: clinicianById(slot.clinicianId) };
-}
-
-function specialtyWords(value: string) {
-  return value.replaceAll("_", " ");
-}
-
-function recommendOutcome(
-  care: CareCase,
-  result: ScreeningResult,
-): { outcome: "direct_close" | "confirmatory" | "verify"; label: string; reason: string } {
-  const ref = referralOf(care);
-  if (ref.branch === "direct_close" || (ref.branch === "confirmatory" && ref.doneAt)) {
-    return {
-      outcome: "verify",
-      label: "Verify outcome",
-      reason: "Visit path is complete — assist recommends verify to close the loop.",
-    };
-  }
-  if (ref.branch === "confirmatory" && !ref.bookedAt) {
-    return {
-      outcome: "confirmatory",
-      label: "Book confirmatory",
-      reason: "Confirmatory branch already chosen — book the referral slot.",
-    };
-  }
-  // FIT / marked BP / MoCA often need confirmatory; metabolic often direct-close for demo.
-  const preferConfirm =
-    result.code === "fit" ||
-    result.code === "moca" ||
-    (result.code === "bp" && care.urgency === "urgent");
-  if (preferConfirm) {
-    const spec = confirmatorySpecialty(result.code);
-    return {
-      outcome: "confirmatory",
-      label: `Refer · ${specialtyWords(spec)}`,
-      reason: `${result.labelEn} often needs a confirmatory path — assist suggests branch, not silent close.`,
-    };
-  }
-  return {
-    outcome: "direct_close",
-    label: "Close without referral",
-    reason: "Screening follow-up can close on the main path after visit — confirm to verify.",
-  };
-}
-
 /**
- * Rules-first loop assist. Proposes next human action — never auto-tells,
- * auto-books, or auto-verifies.
+ * Sync scaffold for stage labels / step rail. Picks (owner, slot, draft, outcome)
+ * come from LLM loop agents via mergeLoopSuggestion — never hardcoded rankings.
  */
 export function buildLoopAssist(care: CareCase): LoopAssist {
-  const patient = patientById(care.patientId);
   const result = resultById(care.resultId);
   const sla = planSlaRecovery(care, result);
   const steps = stepsFor(care.stage);
@@ -167,6 +107,7 @@ export function buildLoopAssist(care: CareCase): LoopAssist {
       reason: "Assist has nothing left — visit outcome is verified.",
       agent: "outcomeGate",
       steps,
+      llmStatus: "ready",
     };
   }
   if (care.stage === "lost") {
@@ -176,6 +117,7 @@ export function buildLoopAssist(care: CareCase): LoopAssist {
       reason: "Documented gap stays visible — restart only if clinically appropriate.",
       agent: "outcomeGate",
       steps,
+      llmStatus: "ready",
     };
   }
 
@@ -191,54 +133,40 @@ export function buildLoopAssist(care: CareCase): LoopAssist {
           : `Watch: ${result.labelEn} · ${openHours.toFixed(0)}h open · lock urgency before outreach.`,
       agent: "watch",
       steps,
+      llmStatus: "ready",
     };
   }
 
   if (care.stage === "stratified") {
-    const brief = localBrief(patient, result, care);
     return {
       actionLabel: sla.status === "breached" ? "Tell patient now" : "Tell patient",
-      boardLine: "Tell · draft ready",
-      reason:
-        sla.status !== "ok"
-          ? "Draft tell ready — send via Sahhatna; assist never auto-messages."
-          : "Draft tell: calm Sahhatna copy ready — you still press Send.",
+      boardLine: "Tell · drafting…",
+      reason: "Draft tell agent is writing calm Sahhatna copy — you still press Send.",
       agent: "draftTell",
-      draftMessage: brief.patientMessageEn,
       steps,
+      llmStatus: "loading",
     };
   }
 
   if (care.stage === "told") {
-    const { owner } = pickOwner(care);
     return {
-      actionLabel: owner ? `Assign ${owner.nameEn.split(" ")[0]}` : "Assign clinician",
-      boardLine: owner ? `Own · ${owner.nameEn.split(" ")[0]}` : "Assign owner",
-      reason: owner
-        ? `Match owner: ${owner.nameEn} · ${specialtyWords(owner.specialty)} · ${owner.facility} (network-safe).`
-        : "No clinician matches this specialty and network.",
+      actionLabel: "Assign clinician",
+      boardLine: "Own · matching…",
+      reason: "Match owner agent is ranking the live clinician roster with guardrails.",
       agent: "matchOwner",
-      ownerId: owner?.id,
-      ownerLabel: owner ? `${owner.nameEn} · ${specialtyWords(owner.specialty)}` : undefined,
       steps,
+      llmStatus: "loading",
     };
   }
 
   if (care.stage === "owned") {
-    const { slot, clinician } = pickSlot(care, care.ownerId);
-    const when = slot ? slot.when.replace("T", " ") : "";
     return {
-      actionLabel: slot ? "Book suggested slot" : "Book visit",
-      boardLine: slot ? `Book · ${when.slice(5, 16)}` : "Book visit",
-      reason: slot
-        ? `Suggest slot: ${when} with ${clinician?.nameEn || "clinician"} on ${patient.network.replaceAll("_", " ")}.`
-        : "No network-safe slot available for this pathway.",
+      actionLabel: "Book visit",
+      boardLine: "Book · matching…",
+      reason: "Suggest slot agent is choosing among network-safe times with guardrails.",
       agent: "suggestSlot",
-      slotId: slot?.id,
-      slotLabel: slot
-        ? `${when} · ${clinician?.nameEn || "clinician"}`
-        : undefined,
       steps,
+      llmStatus: "loading",
     };
   }
 
@@ -246,23 +174,101 @@ export function buildLoopAssist(care: CareCase): LoopAssist {
     return {
       actionLabel: "Record visit",
       boardLine: "Visit · attend?",
-      reason: "Suggest slot held — confirm attendance, reschedule, or mark no-show. Assist never closes alone.",
+      reason: "Confirm attendance, reschedule, or mark no-show. Assist never closes alone.",
       agent: "suggestSlot",
       steps,
+      llmStatus: "ready",
     };
   }
 
-  // seen
-  const rec = recommendOutcome(care, result);
   return {
-    actionLabel: rec.label,
-    boardLine: rec.label,
-    reason: rec.reason,
+    actionLabel: "Choose pathway",
+    boardLine: "Outcome · deciding…",
+    reason: "Outcome agent is recommending a pathway — confirm to apply.",
     agent: "outcomeGate",
-    outcome: rec.outcome,
-    outcomeLabel: rec.label,
     steps,
+    llmStatus: "loading",
   };
 }
 
-export { AGENT_LABEL };
+/** Merge a completed (or failed) LLM loop-agent result into the sync scaffold. */
+export function mergeLoopSuggestion(
+  base: LoopAssist,
+  suggestion: LoopAgentSuggestion | null,
+): LoopAssist {
+  if (!suggestion) return base;
+
+  const next: LoopAssist = {
+    ...base,
+    llmStatus: suggestion.status,
+    llmModel: suggestion.model,
+    llmDetail: suggestion.detail,
+    reason: suggestion.detail || base.reason,
+  };
+
+  if (suggestion.status !== "ready") {
+    if (suggestion.agent === "matchOwner") {
+      next.boardLine = suggestion.status === "loading" ? "Own · matching…" : "Own · pick manually";
+      next.actionLabel = "Assign clinician";
+    } else if (suggestion.agent === "suggestSlot" && base.agent === "suggestSlot") {
+      next.boardLine =
+        suggestion.status === "loading" ? "Book · matching…" : "Book · pick manually";
+    } else if (suggestion.agent === "draftTell") {
+      next.boardLine = suggestion.status === "loading" ? "Tell · drafting…" : "Tell · write manually";
+    } else if (suggestion.agent === "outcomeGate") {
+      next.boardLine =
+        suggestion.status === "loading" ? "Outcome · deciding…" : "Outcome · choose";
+    }
+    return next;
+  }
+
+  if (suggestion.agent === "draftTell" && suggestion.draftMessage) {
+    next.draftMessage = suggestion.draftMessage;
+    next.boardLine = "Tell · draft ready";
+    next.reason = suggestion.why
+      ? `${suggestion.detail} Why · ${suggestion.why}`
+      : suggestion.detail;
+  }
+
+  if (suggestion.agent === "matchOwner" && suggestion.pickId) {
+    next.ownerId = suggestion.pickId;
+    next.ownerLabel = suggestion.pickLabel;
+    next.ownerWhy = suggestion.why;
+    next.actionLabel = suggestion.pickLabel
+      ? `Assign ${suggestion.pickLabel.split(" · ")[0].split(" ")[0]}`
+      : "Assign clinician";
+    next.boardLine = suggestion.pickLabel
+      ? `Own · ${suggestion.pickLabel.split(" · ")[0].split(" ")[0]}`
+      : "Assign owner";
+    next.reason = suggestion.why
+      ? `${suggestion.detail} Why · ${suggestion.why}`
+      : suggestion.detail;
+  }
+
+  if (suggestion.agent === "suggestSlot" && suggestion.pickId) {
+    next.slotId = suggestion.pickId;
+    next.slotLabel = suggestion.pickLabel;
+    next.slotWhy = suggestion.why;
+    next.actionLabel = "Book suggested slot";
+    const when = suggestion.pickLabel?.split(" · ")[0] || "";
+    next.boardLine = when ? `Book · ${when.slice(5, 16)}` : "Book visit";
+    next.reason = suggestion.why
+      ? `${suggestion.detail} Why · ${suggestion.why}`
+      : suggestion.detail;
+  }
+
+  if (suggestion.agent === "outcomeGate" && suggestion.outcome) {
+    next.outcome = suggestion.outcome;
+    next.outcomeLabel = suggestion.pickLabel;
+    next.outcomeWhy = suggestion.why;
+    next.actionLabel = suggestion.pickLabel || "Choose pathway";
+    next.boardLine = suggestion.pickLabel || "Choose pathway";
+    next.reason = suggestion.why
+      ? `${suggestion.detail} Why · ${suggestion.why}`
+      : suggestion.detail;
+  }
+
+  return next;
+}
+
+export { AGENT_LABEL, activeAgent };

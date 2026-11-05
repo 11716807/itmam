@@ -93,6 +93,25 @@ Rules:
 - Do not add new clinical claims.
 - Keep names and product word Sahhatna / صحةنا as appropriate.`;
 
+const LOOP_PROMPT = `You are an Itmam loop-assist agent for Abu Dhabi IFHAS/EAS care coordination.
+You receive a JSON pack with agent, case, patient, finding, and a live roster.
+Return JSON only in this shape:
+{"pickId":"","why":"one coordination sentence","draftEn":"","outcome":"","confidence":0.0}
+
+Agent rules by pack.agent:
+- draftTell: fill draftEn (calm Sahhatna patient message, English). leave pickId/outcome empty. why = why this tone/content.
+- matchOwner: pickId MUST be one id from roster.clinicians. why = one line why that clinician fits coordination (specialty/network/SLA) — not a diagnosis.
+- suggestSlot: pickId MUST be one id from roster.slots. why = one line why that slot (timing/clinician fit) — not a diagnosis.
+- outcomeGate: outcome MUST be one of allowedOutcomes (direct_close|confirmatory|verify). leave pickId empty. why = coordination rationale.
+- watch: return empty pickId/draftEn/outcome with a short why on next human action.
+
+Hard rules:
+- Never invent clinician ids, slot ids, facilities, or times outside the roster.
+- Never diagnose, confirm disease, or prescribe.
+- Never claim a message was sent or a stage advanced — suggest only.
+- Prefer urgency/SLA risk and specialty/network fit when ranking.
+- Use only facts in the pack.`;
+
 const MIME = {
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
@@ -161,7 +180,9 @@ async function handleApi(req, res, path) {
         ? PREPARE_PROMPT
         : path === "/api/itmam-translate"
           ? TRANSLATE_PROMPT
-          : BRIEF_PROMPT;
+          : path === "/api/itmam-loop"
+            ? LOOP_PROMPT
+            : BRIEF_PROMPT;
     let last = "Request failed";
     for (const name of MODELS) {
       try {
@@ -172,6 +193,18 @@ async function handleApi(req, res, path) {
           const text =
             typeof out === "object" && out && "text" in out ? String(out.text) : "";
           sendJson(res, 200, { text });
+        } else if (path === "/api/itmam-loop") {
+          const pick =
+            typeof out === "object" && out
+              ? {
+                  pickId: out.pickId != null ? String(out.pickId) : undefined,
+                  why: out.why != null ? String(out.why) : undefined,
+                  draftEn: out.draftEn != null ? String(out.draftEn) : undefined,
+                  outcome: out.outcome != null ? String(out.outcome) : undefined,
+                  confidence: typeof out.confidence === "number" ? out.confidence : undefined,
+                }
+              : {};
+          sendJson(res, 200, { model: name, pick });
         } else {
           sendJson(res, 200, { model: name, brief: out });
         }
@@ -270,7 +303,12 @@ const server = createServer(async (req, res) => {
     await handleState(req, res);
     return;
   }
-  if (path === "/api/itmam" || path === "/api/itmam-prepare" || path === "/api/itmam-translate") {
+  if (
+    path === "/api/itmam" ||
+    path === "/api/itmam-prepare" ||
+    path === "/api/itmam-translate" ||
+    path === "/api/itmam-loop"
+  ) {
     await handleApi(req, res, path);
     return;
   }

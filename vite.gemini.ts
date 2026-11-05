@@ -43,6 +43,25 @@ Rules:
 - Do not add new clinical claims.
 - Keep names and product word Sahhatna / صحةنا as appropriate.`;
 
+const LOOP_PROMPT = `You are an Itmam loop-assist agent for Abu Dhabi IFHAS/EAS care coordination.
+You receive a JSON pack with agent, case, patient, finding, and a live roster.
+Return JSON only in this shape:
+{"pickId":"","why":"one coordination sentence","draftEn":"","outcome":"","confidence":0.0}
+
+Agent rules by pack.agent:
+- draftTell: fill draftEn (calm Sahhatna patient message, English). leave pickId/outcome empty. why = why this tone/content.
+- matchOwner: pickId MUST be one id from roster.clinicians. why = one line why that clinician fits coordination (specialty/network/SLA) — not a diagnosis.
+- suggestSlot: pickId MUST be one id from roster.slots. why = one line why that slot (timing/clinician fit) — not a diagnosis.
+- outcomeGate: outcome MUST be one of allowedOutcomes (direct_close|confirmatory|verify). leave pickId empty. why = coordination rationale.
+- watch: return empty pickId/draftEn/outcome with a short why on next human action.
+
+Hard rules:
+- Never invent clinician ids, slot ids, facilities, or times outside the roster.
+- Never diagnose, confirm disease, or prescribe.
+- Never claim a message was sent or a stage advanced — suggest only.
+- Prefer urgency/SLA risk and specialty/network fit when ranking.
+- Use only facts in the pack.`;
+
 async function readBody(req: IncomingMessage): Promise<string> {
   const chunks: Buffer[] = [];
   for await (const chunk of req) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
@@ -131,7 +150,12 @@ export function geminiPlugin(apiKey: string, model: string): Plugin {
 
   const handle: Connect.NextHandleFunction = async (req, res, next) => {
     const path = req.url?.split("?")[0];
-    if (path !== "/api/itmam" && path !== "/api/itmam-prepare" && path !== "/api/itmam-translate") {
+    if (
+      path !== "/api/itmam" &&
+      path !== "/api/itmam-prepare" &&
+      path !== "/api/itmam-translate" &&
+      path !== "/api/itmam-loop"
+    ) {
       next();
       return;
     }
@@ -154,7 +178,9 @@ export function geminiPlugin(apiKey: string, model: string): Plugin {
           ? PREPARE_PROMPT
           : path === "/api/itmam-translate"
             ? TRANSLATE_PROMPT
-            : BRIEF_PROMPT;
+            : path === "/api/itmam-loop"
+              ? LOOP_PROMPT
+              : BRIEF_PROMPT;
       let last = "Translate failed";
       for (const name of models) {
         try {
@@ -167,6 +193,33 @@ export function geminiPlugin(apiKey: string, model: string): Plugin {
                 ? String((out as { text: string }).text)
                 : "";
             send(res, 200, { text });
+          } else if (path === "/api/itmam-loop") {
+            const pick =
+              typeof out === "object" && out
+                ? {
+                    pickId:
+                      "pickId" in out && out.pickId != null
+                        ? String((out as { pickId: unknown }).pickId)
+                        : undefined,
+                    why:
+                      "why" in out && out.why != null
+                        ? String((out as { why: unknown }).why)
+                        : undefined,
+                    draftEn:
+                      "draftEn" in out && out.draftEn != null
+                        ? String((out as { draftEn: unknown }).draftEn)
+                        : undefined,
+                    outcome:
+                      "outcome" in out && out.outcome != null
+                        ? String((out as { outcome: unknown }).outcome)
+                        : undefined,
+                    confidence:
+                      "confidence" in out && typeof (out as { confidence: unknown }).confidence === "number"
+                        ? (out as { confidence: number }).confidence
+                        : undefined,
+                  }
+                : {};
+            send(res, 200, { model: name, pick });
           } else {
             send(res, 200, { model: name, brief: out });
           }

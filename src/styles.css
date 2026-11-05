@@ -2429,30 +2429,144 @@ a {
   letter-spacing: -0.02em;
 }
 
-/* Quiet loop assist — sits inside the existing action panel */
+/* Loop assist — clear suggested pick, still inside Next action */
 .loop-assist {
   display: flex;
   flex-wrap: wrap;
   gap: 12px;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   margin: 0 0 14px;
-  padding: 10px 12px;
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.72);
-  border: 1px solid rgba(13, 92, 99, 0.1);
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: linear-gradient(135deg, rgba(13, 92, 99, 0.08), rgba(255, 255, 255, 0.95) 55%);
+  border: 1px solid rgba(13, 92, 99, 0.22);
+  box-shadow: 0 6px 18px rgba(13, 92, 99, 0.06);
+}
+
+.loop-assist.has-pick {
+  border-color: rgba(13, 92, 99, 0.32);
+}
+
+.loop-assist.is-loading {
+  border-style: dashed;
+}
+
+.loop-assist.is-blocked {
+  border-color: rgba(180, 83, 9, 0.35);
+  background: linear-gradient(135deg, rgba(251, 191, 36, 0.12), rgba(255, 255, 255, 0.95) 55%);
+}
+
+.assist-pick-loading {
+  border-style: dashed;
+  animation: assist-pulse 1.4s ease-in-out infinite;
+}
+
+.assist-guardrail-note {
+  margin: 0 0 8px;
+  font-size: 0.8rem;
+}
+
+@keyframes assist-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.62;
+  }
 }
 
 .loop-assist-main {
-  flex: 1 1 220px;
+  flex: 1 1 240px;
   min-width: 0;
 }
 
 .loop-assist-reason {
   margin: 2px 0 8px;
-  font-size: 0.88rem;
+  font-size: 0.9rem;
   line-height: 1.4;
   color: var(--ink);
+}
+
+.assist-pick {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 10px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: #fff;
+  border: 1.5px dashed rgba(13, 92, 99, 0.35);
+}
+
+.assist-pick.on {
+  border-style: solid;
+  border-color: var(--teal);
+  background: linear-gradient(180deg, #e6f4f5, #fff 70%);
+}
+
+.assist-pick-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #fff;
+  background: var(--teal);
+}
+
+.assist-pick-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.assist-pick strong {
+  font-size: 0.95rem;
+  letter-spacing: -0.01em;
+  color: var(--teal-deep);
+}
+
+.assist-pick-why,
+.choice-why {
+  margin: 0;
+  font-size: 0.8rem;
+  line-height: 1.35;
+  color: var(--teal-deep);
+}
+
+.choice-why {
+  margin-top: 4px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(13, 92, 99, 0.12);
+}
+
+.assist-field-hint {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 8px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: var(--teal-soft);
+  border: 1px solid rgba(13, 92, 99, 0.2);
+  font-size: 0.84rem;
+  color: var(--teal-deep);
+}
+
+.assist-field-hint strong {
+  font-weight: 750;
+}
+
+.field.has-suggest select {
+  border-color: rgba(13, 92, 99, 0.4);
+  box-shadow: 0 0 0 3px rgba(13, 92, 99, 0.1);
 }
 
 .loop-assist-steps {
@@ -2480,18 +2594,135 @@ a {
 }
 
 .loop-assist-steps li.now {
-  color: var(--teal-deep);
-  background: var(--teal-soft);
+  color: #fff;
+  background: var(--teal);
+  box-shadow: 0 2px 8px rgba(13, 92, 99, 0.25);
 }
 
 .loop-assist-apply {
   flex: 0 0 auto;
   align-self: center;
+  cursor: pointer;
+  pointer-events: auto;
+  min-width: 9.5rem;
+}
+
+.loop-assist-apply.is-applied {
+  background: var(--mint-soft);
+  color: #065f46;
+  border: 1px solid rgba(42, 157, 110, 0.35);
 }
 
 .path-decide-card.suggested {
+  position: relative;
+  border-color: var(--teal);
+  border-width: 2px;
+  box-shadow: 0 0 0 3px rgba(13, 92, 99, 0.12);
+}
+
+.path-decide-card.suggested::after {
+  content: "Assist pick";
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  padding: 0.15rem 0.45rem;
+  border-radius: 999px;
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #fff;
+  background: var(--teal);
+}
+
+.choice-list {
+  margin: 4px 0 12px;
+}
+
+.choice-list-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.choice-list-count {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.choice-list-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 8px;
+}
+
+.choice-card {
+  display: grid;
+  gap: 4px;
+  text-align: left;
+  padding: 12px 12px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(13, 92, 99, 0.14);
+  background: #fff;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+  transition:
+    border-color 0.15s var(--ease),
+    box-shadow 0.15s var(--ease),
+    transform 0.15s var(--ease);
+}
+
+.choice-card:hover {
   border-color: rgba(13, 92, 99, 0.35);
-  box-shadow: 0 0 0 2px rgba(13, 92, 99, 0.08);
+  transform: translateY(-1px);
+}
+
+.choice-card.on {
+  border-color: var(--teal);
+  background: linear-gradient(180deg, #e8f5f6, #fff 65%);
+  box-shadow: 0 0 0 2px rgba(13, 92, 99, 0.12);
+}
+
+.choice-card.suggested:not(.on) {
+  border-color: rgba(13, 92, 99, 0.28);
+  background: linear-gradient(180deg, rgba(13, 92, 99, 0.06), #fff 60%);
+}
+
+.choice-card-top {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-height: 1.2rem;
+}
+
+.choice-selected-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.15rem 0.45rem;
+  border-radius: 999px;
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #065f46;
+  background: #d1fae5;
+}
+
+.choice-card strong {
+  font-family: var(--display);
+  font-size: 0.98rem;
+  letter-spacing: -0.015em;
+  color: var(--ink);
+}
+
+.choice-meta {
+  font-size: 0.8rem;
+  line-height: 1.35;
+  color: var(--muted);
 }
 
 .action-progress {
@@ -3282,6 +3513,19 @@ a {
 .how-decided.on {
   background: var(--teal-soft);
   color: var(--teal-deep);
+}
+
+.board-empty-open {
+  margin: 0.4rem 0 0.2rem;
+  font-size: 0.9rem;
+}
+
+.closed-list .case-row.closed-verified {
+  opacity: 0.92;
+}
+
+.closed-list .case-row.closed-lost {
+  border-color: rgba(180, 83, 9, 0.25);
 }
 
 .held-list {

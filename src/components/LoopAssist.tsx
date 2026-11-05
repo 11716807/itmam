@@ -6,18 +6,63 @@ type Props = {
   applyLabel?: string;
   onApply?: () => void;
   applyDisabled?: boolean;
+  /** Strong pick callout (owner / slot name). */
+  pickLabel?: string;
+  pickWhy?: string;
+  pickSelected?: boolean;
 };
 
 /**
- * Quiet loop-assist strip — one reason line + optional apply.
- * Details stay collapsed so Case does not feel like a second dashboard.
+ * Loop-assist strip with LLM agent status + suggested pick.
  */
-export function LoopAssistBar({ assist, applyLabel, onApply, applyDisabled }: Props) {
+export function LoopAssistBar({
+  assist,
+  applyLabel,
+  onApply,
+  applyDisabled,
+  pickLabel,
+  pickWhy,
+  pickSelected,
+}: Props) {
+  const loading = assist.llmStatus === "loading";
+  const blocked = assist.llmStatus === "blocked" || assist.llmStatus === "error";
+  const modelTag = assist.llmModel
+    ? assist.llmModel.replace(/^gemini-/, "Gemini ")
+    : null;
+
   return (
-    <div className="loop-assist">
+    <div
+      className={`loop-assist ${pickLabel ? "has-pick" : ""} ${loading ? "is-loading" : ""} ${blocked ? "is-blocked" : ""}`}
+    >
       <div className="loop-assist-main">
-        <p className="eyebrow">Assist · {AGENT_LABEL[assist.agent]}</p>
+        <p className="eyebrow">
+          Assist · {AGENT_LABEL[assist.agent]}
+          {loading ? " · thinking" : modelTag ? ` · ${modelTag}` : " · LLM"}
+        </p>
         <p className="loop-assist-reason">{assist.reason}</p>
+        {loading ? (
+          <div className="assist-pick assist-pick-loading" aria-live="polite">
+            <span className="assist-pick-badge">Agent</span>
+            <div className="assist-pick-copy">
+              <strong>Ranking roster with guardrails…</strong>
+              <p className="assist-pick-why">Suggestions stay confirm-first — nothing auto-applies.</p>
+            </div>
+          </div>
+        ) : null}
+        {!loading && pickLabel ? (
+          <div className={`assist-pick ${pickSelected ? "on" : ""}`}>
+            <span className="assist-pick-badge">Suggested</span>
+            <div className="assist-pick-copy">
+              <strong>{pickLabel}</strong>
+              {pickWhy ? <p className="assist-pick-why">Why · {pickWhy}</p> : null}
+            </div>
+          </div>
+        ) : null}
+        {!loading && blocked ? (
+          <p className="assist-guardrail-note muted">
+            Guardrails held the model pick — choose manually from the list below.
+          </p>
+        ) : null}
         <ol className="loop-assist-steps" aria-label="Loop assist path">
           {assist.steps.map((step) => (
             <li key={step.id} className={step.status}>
@@ -29,11 +74,15 @@ export function LoopAssistBar({ assist, applyLabel, onApply, applyDisabled }: Pr
       {onApply && applyLabel ? (
         <button
           type="button"
-          className="btn ghost loop-assist-apply"
-          disabled={applyDisabled}
-          onClick={onApply}
+          className={`btn loop-assist-apply ${pickSelected || applyDisabled ? "is-applied" : "primary"}`}
+          disabled={applyDisabled || loading}
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            onApply();
+          }}
         >
-          {applyLabel}
+          {loading ? "Waiting…" : applyLabel}
         </button>
       ) : null}
     </div>

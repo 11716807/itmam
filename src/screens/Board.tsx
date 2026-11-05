@@ -58,14 +58,26 @@ export function Board({
   );
   const [liveRerun, setLiveRerun] = useState<AgentRun | null>(null);
   const [heldOpen, setHeldOpen] = useState(false);
+  const [closedOpen, setClosedOpen] = useState(true);
 
   const resultsById = Object.fromEntries(
     cases.map((c) => [c.resultId, resultById(c.resultId)]),
   ) as Record<string, ScreeningResult>;
 
   const open = cases.filter((c) => isOpen(c.stage));
-  const verified = cases.filter((c) => c.stage === "verified").length;
-  const lost = cases.filter((c) => c.stage === "lost").length;
+  const closed = useMemo(
+    () =>
+      cases
+        .filter((c) => c.stage === "verified" || c.stage === "lost")
+        .sort((a, b) => {
+          const aAt = a.verifiedAt || a.lostAt || a.openedAt;
+          const bAt = b.verifiedAt || b.lostAt || b.openedAt;
+          return bAt.localeCompare(aAt);
+        }),
+    [cases],
+  );
+  const verified = closed.filter((c) => c.stage === "verified").length;
+  const lost = closed.filter((c) => c.stage === "lost").length;
   const breached = open.filter((c) => slaBreached(c)).length;
   const urgentOpen = open.filter((c) => c.urgency === "urgent");
   const escalatePool = open.filter((c) => c.urgency === "urgent" || slaBreached(c));
@@ -345,88 +357,153 @@ export function Board({
               </div>
             ) : null}
 
-            <div className="case-grid">
-              {ranked.map(({ case: row, score, reasons }) => {
-                const patient = patientById(row.patientId);
-                const result = resultById(row.resultId);
-                const sla = planSlaRecovery(row, result);
-                const assist = buildLoopAssist(row);
-                const run = runForCase(row);
-                const expanded = Boolean(run && graphRunId === run.id);
-                return (
-                  <article
-                    key={row.id}
-                    className={`case-block ${expanded ? "expanded" : ""}`}
-                  >
-                    <button
-                      type="button"
-                      className={`case-row ${sla.status === "breached" ? "breach" : ""} enter-case`}
-                      onClick={() => onOpen(row.id)}
+            {ranked.length ? (
+              <div className="case-grid">
+                {ranked.map(({ case: row, score, reasons }) => {
+                  const patient = patientById(row.patientId);
+                  const result = resultById(row.resultId);
+                  const sla = planSlaRecovery(row, result);
+                  const assist = buildLoopAssist(row);
+                  const run = runForCase(row);
+                  const expanded = Boolean(run && graphRunId === run.id);
+                  return (
+                    <article
+                      key={row.id}
+                      className={`case-block ${expanded ? "expanded" : ""}`}
                     >
-                      <div className="case-row-main">
-                        <h3>
-                          {patient.nameEn}
-                          <span className="name-ar">{patient.nameAr}</span>
-                        </h3>
-                        <p>
-                          {result.labelEn} {result.value}
-                          {result.unit ? ` ${result.unit}` : ""} · {result.program} ·{" "}
-                          {hoursOpen(row).toFixed(0)}h open
-                        </p>
-                        <div className="case-row-tags">
-                          <span className={`chip ${row.urgency}`}>{row.urgency}</span>
-                          {sla.status === "breached" ? (
-                            <span className="chip sla-tag breached">
-                              SLA +{sla.hoursOver.toFixed(0)}h
-                            </span>
-                          ) : sla.status === "approaching" ? (
-                            <span className="chip sla-tag approaching">SLA soon</span>
-                          ) : null}
-                          <span className="chip stage-chip">{STAGE_LABEL[row.stage].en}</span>
+                      <button
+                        type="button"
+                        className={`case-row ${sla.status === "breached" ? "breach" : ""} enter-case`}
+                        onClick={() => onOpen(row.id)}
+                      >
+                        <div className="case-row-main">
+                          <h3>
+                            {patient.nameEn}
+                            <span className="name-ar">{patient.nameAr}</span>
+                          </h3>
+                          <p>
+                            {result.labelEn} {result.value}
+                            {result.unit ? ` ${result.unit}` : ""} · {result.program} ·{" "}
+                            {hoursOpen(row).toFixed(0)}h open
+                          </p>
+                          <div className="case-row-tags">
+                            <span className={`chip ${row.urgency}`}>{row.urgency}</span>
+                            {sla.status === "breached" ? (
+                              <span className="chip sla-tag breached">
+                                SLA +{sla.hoursOver.toFixed(0)}h
+                              </span>
+                            ) : sla.status === "approaching" ? (
+                              <span className="chip sla-tag approaching">SLA soon</span>
+                            ) : null}
+                            <span className="chip stage-chip">{STAGE_LABEL[row.stage].en}</span>
+                          </div>
                         </div>
-                      </div>
-                      <div className="case-row-side">
-                        <div className="score-pill">
-                          <strong>{score}</strong>
-                          <span className="muted">risk</span>
+                        <div className="case-row-side">
+                          <div className="score-pill">
+                            <strong>{score}</strong>
+                            <span className="muted">risk</span>
+                          </div>
+                          <p className="case-row-why">{reasons[0] || row.aiPriorityReason}</p>
+                          {sla.status !== "ok" ? (
+                            <p className="sla-row-action">{sla.actionLabel}</p>
+                          ) : (
+                            <p className="case-cta">{assist.boardLine} →</p>
+                          )}
                         </div>
-                        <p className="case-row-why">{reasons[0] || row.aiPriorityReason}</p>
-                        {sla.status !== "ok" ? (
-                          <p className="sla-row-action">{sla.actionLabel}</p>
-                        ) : (
-                          <p className="case-cta">{assist.boardLine} →</p>
-                        )}
-                      </div>
-                    </button>
-                    {run ? (
-                      <div className="case-row-tools">
-                        <button
-                          type="button"
-                          className={`how-decided ${expanded ? "on" : ""}`}
-                          onClick={() => toggleAgents(run)}
-                          aria-expanded={expanded}
-                        >
-                          {expanded ? "Hide agent harness" : "How decided · agent harness"}
-                        </button>
-                      </div>
-                    ) : null}
-                    {expanded && run ? (
-                      <AgentGraph
-                        run={graphFor(run)}
-                        fixDraft={fixDraft}
-                        onFixChange={setFixDraft}
-                        onRerun={() => void submitRerun(run)}
-                        rerunning={rerunning && graphRunId === run.id}
-                        focusToken={graphRunId === run.id ? rerunFocus : 0}
-                        revealThrough={
-                          rerunning && graphRunId === run.id ? revealThrough : null
-                        }
-                      />
-                    ) : null}
-                  </article>
-                );
-              })}
-            </div>
+                      </button>
+                      {run ? (
+                        <div className="case-row-tools">
+                          <button
+                            type="button"
+                            className={`how-decided ${expanded ? "on" : ""}`}
+                            onClick={() => toggleAgents(run)}
+                            aria-expanded={expanded}
+                          >
+                            {expanded ? "Hide agent harness" : "How decided · agent harness"}
+                          </button>
+                        </div>
+                      ) : null}
+                      {expanded && run ? (
+                        <AgentGraph
+                          run={graphFor(run)}
+                          fixDraft={fixDraft}
+                          onFixChange={setFixDraft}
+                          onRerun={() => void submitRerun(run)}
+                          rerunning={rerunning && graphRunId === run.id}
+                          focusToken={graphRunId === run.id ? rerunFocus : 0}
+                          revealThrough={
+                            rerunning && graphRunId === run.id ? revealThrough : null
+                          }
+                        />
+                      ) : null}
+                    </article>
+                  );
+                })}
+              </div>
+            ) : (
+              <p className="muted board-empty-open">No open loops — closed cases are below.</p>
+            )}
+
+            {closed.length ? (
+              <div className="held-list closed-list">
+                <button
+                  type="button"
+                  className="held-toggle"
+                  onClick={() => setClosedOpen((v) => !v)}
+                  aria-expanded={closedOpen}
+                >
+                  <span className="eyebrow">Closed</span>
+                  <strong>
+                    {verified} verified · {lost} lost
+                  </strong>
+                  <span className="held-chevron">{closedOpen ? "Hide" : "Show"}</span>
+                </button>
+                {closedOpen ? (
+                  <div className="case-grid">
+                    {closed.map((row) => {
+                      const patient = patientById(row.patientId);
+                      const result = resultById(row.resultId);
+                      const assist = buildLoopAssist(row);
+                      return (
+                        <article key={row.id} className="case-block closed">
+                          <button
+                            type="button"
+                            className={`case-row enter-case ${row.stage === "lost" ? "closed-lost" : "closed-verified"}`}
+                            onClick={() => onOpen(row.id)}
+                          >
+                            <div className="case-row-main">
+                              <h3>
+                                {patient.nameEn}
+                                <span className="name-ar">{patient.nameAr}</span>
+                              </h3>
+                              <p>
+                                {result.labelEn} {result.value}
+                                {result.unit ? ` ${result.unit}` : ""} · {result.program}
+                              </p>
+                              <div className="case-row-tags">
+                                <span
+                                  className={`chip stage-chip ${row.stage === "verified" ? "ok" : "warn"}`}
+                                >
+                                  {STAGE_LABEL[row.stage].en}
+                                </span>
+                                {row.stage === "lost" && row.lostReason ? (
+                                  <span className="chip warn">
+                                    {row.lostReason.replaceAll("_", " ")}
+                                  </span>
+                                ) : null}
+                              </div>
+                            </div>
+                            <div className="case-row-side">
+                              <p className="case-cta">{assist.boardLine} →</p>
+                            </div>
+                          </button>
+                        </article>
+                      );
+                    })}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
           </>
         ) : null}
 

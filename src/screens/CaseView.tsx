@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { AgentGraph, AgentGraphStrip } from "../components/AgentGraph";
 import { CareTimeline } from "../components/CareTimeline";
 import { CaseAsk } from "../components/CaseAsk";
+import { ChoiceList } from "../components/ChoiceList";
 import { LoopAssistBar } from "../components/LoopAssist";
 import type { AgentRun } from "../lib/agents/types";
 import {
@@ -30,7 +31,9 @@ import {
   tellPatient,
   verifyOutcome,
 } from "../lib/loop";
-import { buildLoopAssist } from "../lib/loopAssist";
+import { runLoopAgent } from "../lib/loopAgents";
+import type { LoopAgentSuggestion } from "../lib/loopAgents";
+import { buildLoopAssist, mergeLoopSuggestion } from "../lib/loopAssist";
 import { canVerify, confirmatorySpecialty, referralOf } from "../lib/pathway";
 import { planSlaRecovery } from "../lib/slaAction";
 import { translateMessage } from "../lib/translate";
@@ -75,7 +78,6 @@ export function CaseView(props: Props) {
   const [confirmNote, setConfirmNote] = useState(props.care.referral?.note ?? "");
   const [showLost, setShowLost] = useState(false);
   const [showAgentGraph, setShowAgentGraph] = useState(false);
-  const assistSeeded = useRef<string>("");
   const [showReschedule, setShowReschedule] = useState(false);
   const [draft, setDraft] = useState("");
   const [composeLang, setComposeLang] = useState<string>("en");
@@ -85,10 +87,17 @@ export function CaseView(props: Props) {
   /** Once the user edits (or we finish initial seed), never auto-overwrite the draft. */
   const draftLocked = useRef(false);
 
+  /** Owner-pinned slots (reschedule / current clinician path). */
   const slots = useMemo(
     () =>
       compatibleSlots(props.care.specialty, patient.network, props.care.ownerId),
     [props.care.specialty, patient.network, props.care.ownerId],
+  );
+
+  /** Full network specialty roster for booking — not just one suggested doctor. */
+  const bookingSlots = useMemo(
+    () => compatibleSlots(props.care.specialty, patient.network, null),
+    [props.care.specialty, patient.network],
   );
 
   const referralSpecialty =
@@ -103,7 +112,49 @@ export function CaseView(props: Props) {
     [props.care.specialty, patient.network],
   );
 
-  const assist = useMemo(() => buildLoopAssist(props.care), [props.care]);
+  const [loopSuggestion, setLoopSuggestion] = useState<LoopAgentSuggestion | null>(null);
+
+  const assist = useMemo(
+    () => mergeLoopSuggestion(buildLoopAssist(props.care), loopSuggestion),
+    [props.care, loopSuggestion],
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    const needsLlm =
+      props.care.stage === "stratified" ||
+      props.care.stage === "told" ||
+      props.care.stage === "owned" ||
+      props.care.stage === "seen";
+
+    if (!needsLlm) {
+      setLoopSuggestion(null);
+      return;
+    }
+
+    setLoopSuggestion({
+      agent:
+        props.care.stage === "stratified"
+          ? "draftTell"
+          : props.care.stage === "told"
+            ? "matchOwner"
+            : props.care.stage === "owned"
+              ? "suggestSlot"
+              : "outcomeGate",
+      stage: props.care.stage,
+      status: "loading",
+      detail: "Loop agent thinking…",
+      guardrails: [],
+    });
+
+    void runLoopAgent(props.care).then((result) => {
+      if (!cancelled) setLoopSuggestion(result);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [props.care.id, props.care.stage, props.care.specialty, props.care.urgency, props.care.ownerId]);
 
   useEffect(() => {
     setVisitNote(props.care.visitNote ?? "");
@@ -113,7 +164,6 @@ export function CaseView(props: Props) {
     setConfirmNote(props.care.referral?.note ?? "");
     setShowLost(false);
     setShowReschedule(false);
-    assistSeeded.current = "";
   }, [
     props.care.id,
     props.care.stage,
@@ -124,22 +174,6 @@ export function CaseView(props: Props) {
     props.care.referral?.note,
     props.care.referral?.branch,
   ]);
-
-  // Quiet prefill — only once per stage enter, never fight the coordinator.
-  useEffect(() => {
-    const key = `${props.care.id}:${props.care.stage}`;
-    if (assistSeeded.current === key) return;
-    const next = buildLoopAssist(props.care);
-    if (props.care.stage === "told" && next.ownerId && !props.care.ownerId) {
-      setOwnerId(next.ownerId);
-      assistSeeded.current = key;
-    } else if (props.care.stage === "owned" && next.slotId && !props.care.slotId) {
-      setSlotId(next.slotId);
-      assistSeeded.current = key;
-    } else if (props.care.stage === "stratified" || props.care.stage === "result_in") {
-      assistSeeded.current = key;
-    }
-  }, [props.care, owners, slots]);
 
   useEffect(() => {
     draftLocked.current = false;
@@ -158,6 +192,18 @@ export function CaseView(props: Props) {
       if (next) setTranslateTo(next.code);
     }
   }, [composeLang, translateTo]);
+
+  useEffect(() => {
+    if (
+      props.care.stage === "stratified" &&
+      assist.draftMessage &&
+      assist.llmStatus === "ready" &&
+      !draftLocked.current
+    ) {
+      setDraft(assist.draftMessage);
+      setTranslateNote("LLM draft tell ready — edit before send");
+    }
+  }, [props.care.stage, assist.draftMessage, assist.llmStatus]);
 
   function updateDraft(value: string) {
     draftLocked.current = true;
@@ -313,14 +359,15 @@ export function CaseView(props: Props) {
         }
       : stage === "told" && assist.ownerId
         ? {
-            label: "Use suggested owner",
-            disabled: ownerId === assist.ownerId,
+            label:
+              ownerId === assist.ownerId ? "Suggested owner selected" : "Use suggested owner",
+            disabled: false,
             run: () => setOwnerId(assist.ownerId || ""),
           }
         : stage === "owned" && assist.slotId
           ? {
-              label: "Use suggested slot",
-              disabled: slotId === assist.slotId,
+              label: slotId === assist.slotId ? "Suggested slot selected" : "Use suggested slot",
+              disabled: false,
               run: () => setSlotId(assist.slotId || ""),
             }
           : null;
@@ -350,11 +397,6 @@ export function CaseView(props: Props) {
               Assist · {nextLabel}
             </span>
           </div>
-        </div>
-        <div className="row-actions">
-          <button type="button" className="btn" onClick={props.onPatient}>
-            Patient view
-          </button>
         </div>
       </header>
 
@@ -402,6 +444,33 @@ export function CaseView(props: Props) {
                   applyLabel={assistApply?.label}
                   applyDisabled={assistApply?.disabled}
                   onApply={assistApply ? () => assistApply.run() : undefined}
+                  pickLabel={
+                    stage === "told"
+                      ? assist.ownerLabel
+                      : stage === "owned"
+                        ? assist.slotLabel
+                        : stage === "stratified" && assist.draftMessage
+                          ? "Calm Sahhatna draft ready"
+                          : stage === "seen" && assist.outcomeLabel
+                            ? assist.outcomeLabel
+                            : undefined
+                  }
+                  pickWhy={
+                    stage === "told"
+                      ? assist.ownerWhy
+                      : stage === "owned"
+                        ? assist.slotWhy
+                        : stage === "seen"
+                          ? assist.outcomeWhy
+                          : undefined
+                  }
+                  pickSelected={
+                    stage === "told"
+                      ? ownerId === assist.ownerId
+                      : stage === "owned"
+                        ? slotId === assist.slotId
+                        : false
+                  }
                 />
               ) : null}
 
@@ -522,26 +591,28 @@ export function CaseView(props: Props) {
                 <div className="action-card">
                   <p className="action-kicker">Patient booking is now unlocked</p>
                   <p className="muted">
-                    Assign the clinician the patient will book with (same specialty + insurance
-                    network). Owner and visit doctor stay one person — booking later aligns them if
-                    needed.
+                    Choose from clinicians on {specialtyLabel(props.care.specialty)} ·{" "}
+                    {patient.network.replaceAll("_", " ")}. Assist ranks one — you can pick any.
                   </p>
-                  <label className="field">
-                    Visit clinician · {specialtyLabel(props.care.specialty)} ·{" "}
-                    {patient.network.replace("_", " ")}
-                    <select value={ownerId} onChange={(e) => setOwnerId(e.target.value)}>
-                      <option value="">Select clinician…</option>
-                      {owners.map((c) => (
-                        <option key={c.id} value={c.id}>
-                          {c.nameEn} · {specialtyLabel(c.specialty)} · {c.facility}
-                          {assist.ownerId === c.id ? " · suggested" : ""}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  {!owners.length ? (
-                    <p className="banner bad">No clinician matches this specialty and network.</p>
-                  ) : null}
+                  <ChoiceList
+                    label="Visit clinicians"
+                    emptyText="No clinician matches this specialty and network."
+                    value={ownerId}
+                    onChange={setOwnerId}
+                    options={[...owners]
+                      .sort((a, b) => {
+                        if (a.id === assist.ownerId) return -1;
+                        if (b.id === assist.ownerId) return 1;
+                        return a.nameEn.localeCompare(b.nameEn);
+                      })
+                      .map((c) => ({
+                        id: c.id,
+                        title: c.nameEn,
+                        meta: `${specialtyLabel(c.specialty)} · ${c.facility}`,
+                        suggested: c.id === assist.ownerId,
+                        why: c.id === assist.ownerId ? assist.ownerWhy : undefined,
+                      }))}
+                  />
                   <div className="action-card-footer">
                     <button type="button" className="btn" onClick={props.onPatient}>
                       Open patient booking
@@ -562,41 +633,36 @@ export function CaseView(props: Props) {
                 <div className="action-card">
                   <p className="action-kicker">
                     {noShows > 0
-                      ? `Patient missed ×${noShows} — rebook with their clinician`
-                      : "Book a time with the assigned clinician"}
+                      ? `Patient missed ×${noShows} — pick a new visit time`
+                      : "Book a network-safe visit"}
                   </p>
                   <p className="muted">
-                    {props.care.ownerId ? (
-                      <>
-                        Slots for <strong>{clinicianById(props.care.ownerId).nameEn}</strong> on{" "}
-                        {patient.network.replace("_", " ")}. Booking sets that same doctor as owner.
-                      </>
-                    ) : noShows > 0 ? (
-                      "No-show cleared the previous slot and looped back here. Book again; do not treat the miss as closed care."
-                    ) : (
-                      "Pick a network-safe slot. The visit doctor becomes the case owner."
-                    )}
+                    Times across {specialtyLabel(props.care.specialty)} clinicians on{" "}
+                    {patient.network.replaceAll("_", " ")}. Assist suggests one slot — booking aligns
+                    the visit doctor as owner.
                   </p>
-                  <label className="field">
-                    Available slot
-                    <select value={slotId} onChange={(e) => setSlotId(e.target.value)}>
-                      <option value="">Select slot…</option>
-                      {slots.map((s) => {
+                  <ChoiceList
+                    label="Available appointments"
+                    emptyText="No slot in this insurance network for the assigned specialty."
+                    value={slotId}
+                    onChange={setSlotId}
+                    options={[...bookingSlots]
+                      .sort((a, b) => {
+                        if (a.id === assist.slotId) return -1;
+                        if (b.id === assist.slotId) return 1;
+                        return a.when.localeCompare(b.when);
+                      })
+                      .map((s) => {
                         const c = clinicianById(s.clinicianId);
-                        return (
-                          <option key={s.id} value={s.id}>
-                            {s.when.replace("T", " ")} · {c.nameEn}
-                            {assist.slotId === s.id ? " · suggested" : ""}
-                          </option>
-                        );
+                        return {
+                          id: s.id,
+                          title: s.when.replace("T", " "),
+                          meta: `${c.nameEn} · ${specialtyLabel(c.specialty)} · ${c.facility}`,
+                          suggested: s.id === assist.slotId,
+                          why: s.id === assist.slotId ? assist.slotWhy : undefined,
+                        };
                       })}
-                    </select>
-                  </label>
-                  {!slots.length ? (
-                    <p className="banner bad">
-                      No slot in this insurance network for the assigned specialty.
-                    </p>
-                  ) : null}
+                  />
                   <div className="action-card-footer">
                     <button type="button" className="btn" onClick={props.onPatient}>
                       Open patient booking
