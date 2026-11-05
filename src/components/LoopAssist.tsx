@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from "react";
 import { AGENT_LABEL, type LoopAssist } from "../lib/loopAssist";
 
 type Props = {
@@ -26,15 +27,37 @@ export function LoopAssistBar({
 }: Props) {
   const loading = assist.llmStatus === "loading";
   const blocked = assist.llmStatus === "blocked" || assist.llmStatus === "error";
+  const applied = Boolean(pickSelected || applyDisabled);
+  const [flash, setFlash] = useState(false);
+  const flashTimer = useRef<number | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (flashTimer.current != null) window.clearTimeout(flashTimer.current);
+    };
+  }, []);
+
+  useEffect(() => {
+    // Clear click flash when the suggestion changes stage/agent.
+    setFlash(false);
+  }, [assist.agent, assist.ownerId, assist.slotId, assist.draftMessage]);
+
+  function handleApply() {
+    if (!onApply || loading || applyDisabled) return;
+    setFlash(true);
+    if (flashTimer.current != null) window.clearTimeout(flashTimer.current);
+    flashTimer.current = window.setTimeout(() => setFlash(false), 450);
+    onApply();
+  }
 
   return (
     <div
-      className={`loop-assist ${pickLabel ? "has-pick" : ""} ${loading ? "is-loading" : ""} ${blocked ? "is-blocked" : ""}`}
+      className={`loop-assist ${pickLabel ? "has-pick" : ""} ${loading ? "is-loading" : ""} ${blocked ? "is-blocked" : ""} ${applied ? "is-applied" : ""}`}
     >
       <div className="loop-assist-main">
         <p className="eyebrow">
           Assist · {AGENT_LABEL[assist.agent]}
-          {loading ? " · working" : ""}
+          {loading ? " · working" : applied ? " · applied" : ""}
         </p>
         <p className="loop-assist-reason">{assist.reason}</p>
         {loading ? (
@@ -47,8 +70,10 @@ export function LoopAssistBar({
           </div>
         ) : null}
         {!loading && pickLabel ? (
-          <div className={`assist-pick ${pickSelected ? "on" : ""}`}>
-            <span className="assist-pick-badge">Suggested</span>
+          <div className={`assist-pick ${applied ? "on" : ""}`} aria-live="polite">
+            <span className={`assist-pick-badge ${applied ? "applied" : ""}`}>
+              {applied ? "Applied" : "Suggested"}
+            </span>
             <div className="assist-pick-copy">
               <strong>{pickLabel}</strong>
               {pickWhy ? <p className="assist-pick-why">Why · {pickWhy}</p> : null}
@@ -71,15 +96,25 @@ export function LoopAssistBar({
       {onApply && applyLabel ? (
         <button
           type="button"
-          className={`btn loop-assist-apply ${pickSelected || applyDisabled ? "is-applied" : "primary"}`}
+          className={`btn loop-assist-apply ${applied ? "is-applied" : "primary"} ${flash ? "just-clicked" : ""}`}
           disabled={applyDisabled || loading}
+          aria-pressed={applied}
           onClick={(e) => {
             e.preventDefault();
             e.stopPropagation();
-            onApply();
+            handleApply();
           }}
         >
-          {loading ? "Waiting…" : applyLabel}
+          {loading ? "Waiting…" : applied ? (
+            <>
+              <span className="btn-check" aria-hidden>
+                ✓
+              </span>
+              {applyLabel}
+            </>
+          ) : (
+            applyLabel
+          )}
         </button>
       ) : null}
     </div>

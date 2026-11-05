@@ -80,6 +80,7 @@ export function CaseView(props: Props) {
   const [showAgentGraph, setShowAgentGraph] = useState(false);
   const [showReschedule, setShowReschedule] = useState(false);
   const [draft, setDraft] = useState("");
+  const [draftApplied, setDraftApplied] = useState(false);
   const [composeLang, setComposeLang] = useState<string>("en");
   const [translateTo, setTranslateTo] = useState<string>("ar");
   const [translating, setTranslating] = useState(false);
@@ -177,6 +178,7 @@ export function CaseView(props: Props) {
 
   useEffect(() => {
     draftLocked.current = false;
+    setDraftApplied(false);
     const next = localBrief(patient, result, props.care);
     setBrief(next);
     setComposeLang("en");
@@ -198,17 +200,20 @@ export function CaseView(props: Props) {
       props.care.stage === "stratified" &&
       assist.draftMessage &&
       assist.llmStatus === "ready" &&
-      !draftLocked.current
+      !draftLocked.current &&
+      !draftApplied
     ) {
-      setDraft(assist.draftMessage);
-      setTranslateNote("Agent draft ready — edit before send");
+      setTranslateNote("Agent draft ready — tap Use draft to apply");
     }
-  }, [props.care.stage, assist.draftMessage, assist.llmStatus]);
+  }, [props.care.stage, assist.draftMessage, assist.llmStatus, draftApplied]);
 
   function updateDraft(value: string) {
     draftLocked.current = true;
     setDraft(value);
     setTranslateNote(null);
+    if (assist.draftMessage && value.trim() !== assist.draftMessage.trim()) {
+      setDraftApplied(false);
+    }
   }
 
   function activeBrief(): ItmamBrief {
@@ -345,28 +350,31 @@ export function CaseView(props: Props) {
   const findingLine = `${result.labelEn} ${result.value}${result.unit ? ` ${result.unit}` : ""}`;
   const nextLabel = assist.actionLabel;
 
+  const draftIsApplied = draftApplied;
+
   const assistApply =
     stage === "stratified" && assist.draftMessage
       ? {
-          label: "Use draft",
+          label: draftIsApplied ? "Draft applied" : "Use draft",
           disabled: false,
           run: () => {
             draftLocked.current = true;
             setDraft(assist.draftMessage || "");
+            setDraftApplied(true);
             setComposeLang("en");
-            setTranslateNote("Assist draft applied — edit before send");
+            setTranslateNote("Draft applied — edit before send");
           },
         }
       : stage === "told" && assist.ownerId
         ? {
             label:
-              ownerId === assist.ownerId ? "Suggested owner selected" : "Use suggested owner",
+              ownerId === assist.ownerId ? "Owner selected" : "Use suggested owner",
             disabled: false,
             run: () => setOwnerId(assist.ownerId || ""),
           }
         : stage === "owned" && assist.slotId
           ? {
-              label: slotId === assist.slotId ? "Suggested slot selected" : "Use suggested slot",
+              label: slotId === assist.slotId ? "Slot selected" : "Use suggested slot",
               disabled: false,
               run: () => setSlotId(assist.slotId || ""),
             }
@@ -450,7 +458,9 @@ export function CaseView(props: Props) {
                       : stage === "owned"
                         ? assist.slotLabel
                         : stage === "stratified" && assist.draftMessage
-                          ? "Calm Sahhatna draft ready"
+                          ? draftIsApplied
+                            ? "Draft applied to message"
+                            : "Calm Sahhatna draft ready"
                           : stage === "seen" && assist.outcomeLabel
                             ? assist.outcomeLabel
                             : undefined
@@ -460,16 +470,20 @@ export function CaseView(props: Props) {
                       ? assist.ownerWhy
                       : stage === "owned"
                         ? assist.slotWhy
-                        : stage === "seen"
-                          ? assist.outcomeWhy
-                          : undefined
+                        : stage === "stratified" && draftIsApplied
+                          ? "Copied into the compose box — edit before send"
+                          : stage === "seen"
+                            ? assist.outcomeWhy
+                            : undefined
                   }
                   pickSelected={
                     stage === "told"
                       ? ownerId === assist.ownerId
                       : stage === "owned"
                         ? slotId === assist.slotId
-                        : false
+                        : stage === "stratified"
+                          ? draftIsApplied
+                          : false
                   }
                 />
               ) : null}
