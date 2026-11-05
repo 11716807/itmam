@@ -26,9 +26,6 @@ export function LoopAssistBar({
 }: Props) {
   const loading = assist.llmStatus === "loading";
   const blocked = assist.llmStatus === "blocked" || assist.llmStatus === "error";
-  const modelTag = assist.llmModel
-    ? assist.llmModel.replace(/^gemini-/, "Gemini ")
-    : null;
 
   return (
     <div
@@ -37,7 +34,7 @@ export function LoopAssistBar({
       <div className="loop-assist-main">
         <p className="eyebrow">
           Assist · {AGENT_LABEL[assist.agent]}
-          {loading ? " · thinking" : modelTag ? ` · ${modelTag}` : " · LLM"}
+          {loading ? " · thinking" : ""}
         </p>
         <p className="loop-assist-reason">{assist.reason}</p>
         {loading ? (

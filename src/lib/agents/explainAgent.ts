@@ -12,7 +12,7 @@ export function localExplain(run: AgentRun): string {
   if (run.status === "filtered") {
     return `${run.patientName} (${run.finding}) was filtered as ${run.classifiedFlag || "low priority"}: ${run.gateReason || run.priorityReason || "no closed loop"}. Visible on the Not on board tray — not dropped.`;
   }
-  return `${run.patientName} placed as ${run.urgency || "routine"} (${run.specialty?.replaceAll("_", " ") || "unassigned"}, SLA ${run.slaHours ?? "?"}h). Reason: ${run.priorityReason || "actionable finding"}. Rules decided rank; Gemini only narrates.`;
+  return `${run.patientName} placed as ${run.urgency || "routine"} (${run.specialty?.replaceAll("_", " ") || "unassigned"}, SLA ${run.slaHours ?? "?"}h). Reason: ${run.priorityReason || "actionable finding"}. Rules decided rank; assist only narrates.`;
 }
 
 function safeNarration(text: string, run: AgentRun): string {
