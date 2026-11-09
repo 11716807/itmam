@@ -46,9 +46,15 @@ export function Board({
   onPrepareDone,
   onReplaceAgentRun,
 }: Props) {
+  const SAMPLE_FILE_GITHUB =
+    "https://github.com/11716807/itmam/blob/main/public/sample-ifhas-extract.csv";
+  const SAMPLE_FILE_RAW =
+    "https://raw.githubusercontent.com/11716807/itmam/main/public/sample-ifhas-extract.csv";
+
   const fileRef = useRef<HTMLInputElement>(null);
   const [reading, setReading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [showImportHelp, setShowImportHelp] = useState(false);
   const [graphRunId, setGraphRunId] = useState<string | null>(null);
   const [fixDraft, setFixDraft] = useState<AgentEditablePatch>({});
   const [rerunning, setRerunning] = useState(false);
@@ -214,13 +220,49 @@ export function Board({
     return liveRerun && liveRerun.id === run.id ? liveRerun : run;
   }
 
+  function openImportPicker() {
+    setShowImportHelp(true);
+    setError(null);
+    // Let the help banner paint before the native file dialog steals focus.
+    window.setTimeout(() => fileRef.current?.click(), 50);
+  }
+
+  const importHelp = (
+    <div className="import-file-help" role="status">
+      <p>
+        <strong>Need a sample CSV?</strong> Download{" "}
+        <code>sample-ifhas-extract.csv</code> from GitHub, then choose it here.
+      </p>
+      <p className="import-file-links">
+        <a href={SAMPLE_FILE_GITHUB} target="_blank" rel="noreferrer">
+          View on GitHub
+        </a>
+        <span aria-hidden>·</span>
+        <a href={SAMPLE_FILE_RAW} target="_blank" rel="noreferrer" download="sample-ifhas-extract.csv">
+          Download CSV
+        </a>
+        <span aria-hidden>·</span>
+        <a href="/sample-ifhas-extract.csv" download="sample-ifhas-extract.csv">
+          Download from this site
+        </a>
+        <span aria-hidden>·</span>
+        <button type="button" className="text-link" onClick={() => void onSample()}>
+          Or run example without downloading
+        </button>
+      </p>
+    </div>
+  );
+
   const fileInput = (
     <input
       ref={fileRef}
       type="file"
       accept=".csv,text/csv"
       hidden
-      onChange={(e) => void onFile(e.target.files?.[0] ?? null)}
+      onChange={(e) => {
+        setShowImportHelp(false);
+        void onFile(e.target.files?.[0] ?? null);
+      }}
     />
   );
 
@@ -270,7 +312,7 @@ export function Board({
                 type="button"
                 className="btn primary"
                 disabled={preparing}
-                onClick={() => fileRef.current?.click()}
+                onClick={openImportPicker}
               >
                 {preparing ? "Working…" : "Re-import"}
               </button>
@@ -283,6 +325,7 @@ export function Board({
                 Example file
               </button>
             </div>
+            {showImportHelp && !preparing ? importHelp : null}
           </div>
         ) : null}
 
@@ -307,12 +350,13 @@ export function Board({
               like <code>days_waiting</code> feed priority. Expand <strong>How decided</strong> on
               any row to inspect the agent path.
             </p>
+            {importHelp}
             {error ? <p className="import-error">{error}</p> : null}
             <div className="import-hero-actions">
               <button type="button" className="btn primary" onClick={onLoadDemo}>
                 Restore demo board
               </button>
-              <button type="button" className="btn" onClick={() => fileRef.current?.click()}>
+              <button type="button" className="btn" onClick={openImportPicker}>
                 Import CSV
               </button>
               <button type="button" className="btn ghost" onClick={() => void onSample()}>
