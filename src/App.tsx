@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ProductTour } from "./components/ProductTour";
 import { Toast, type ToastItem } from "./components/Toast";
 import { Board } from "./screens/Board";
+import { isOpen } from "./lib/loop";
 import { CaseView } from "./screens/CaseView";
 import { AuditLog } from "./screens/AuditLog";
 import { Outcomes } from "./screens/Outcomes";
@@ -441,6 +443,17 @@ export default function App() {
         </main>
       </div>
 
+      <ProductTour
+        screen={screen}
+        onNavigate={setScreen}
+        onOpenSuggestedCase={() => {
+          const pick =
+            state.cases.find((c) => isOpen(c.stage) && c.urgency === "urgent") ||
+            state.cases.find((c) => isOpen(c.stage));
+          if (pick) openCase(pick.id);
+          else setScreen("board");
+        }}
+      />
       <Toast toast={toast} onDismiss={dismissToast} />
     </div>
   );

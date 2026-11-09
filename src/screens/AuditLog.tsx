@@ -142,7 +142,7 @@ export function AuditLog({ cases, audit, onOpenCase }: Props) {
         </p>
       </header>
 
-      <div className="panel-body">
+      <div className="panel-body" data-tour-id="tour-audit">
         {!cases.length ? (
           <div className="empty-board">
             <p>No audit yet.</p>

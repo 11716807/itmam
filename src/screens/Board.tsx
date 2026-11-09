@@ -320,6 +320,7 @@ export function Board({
                 type="button"
                 className="btn ghost"
                 disabled={preparing}
+                data-tour-id="tour-import"
                 onClick={() => void onSample()}
               >
                 Example file
@@ -352,7 +353,7 @@ export function Board({
             </p>
             {importHelp}
             {error ? <p className="import-error">{error}</p> : null}
-            <div className="import-hero-actions">
+            <div className="import-hero-actions" data-tour-id="tour-import">
               <button type="button" className="btn primary" onClick={onLoadDemo}>
                 Restore demo board
               </button>
@@ -402,8 +403,8 @@ export function Board({
             ) : null}
 
             {ranked.length ? (
-              <div className="case-grid">
-                {ranked.map(({ case: row, score, reasons }) => {
+              <div className="case-grid" data-tour-id="tour-board-list">
+                {ranked.map(({ case: row, score, reasons }, rowIndex) => {
                   const patient = patientById(row.patientId);
                   const result = resultById(row.resultId);
                   const sla = planSlaRecovery(row, result);
@@ -460,6 +461,7 @@ export function Board({
                           <button
                             type="button"
                             className={`how-decided ${expanded ? "on" : ""}`}
+                            data-tour-id={rowIndex === 0 ? "tour-how-decided" : undefined}
                             onClick={() => toggleAgents(run)}
                             aria-expanded={expanded}
                           >
@@ -489,7 +491,7 @@ export function Board({
             )}
 
             {closed.length ? (
-              <div className="held-list closed-list">
+              <div className="held-list closed-list" data-tour-id="tour-closed">
                 <button
                   type="button"
                   className="held-toggle"
@@ -552,7 +554,7 @@ export function Board({
         ) : null}
 
         {heldRuns.length && !preparing ? (
-          <div className="held-list">
+          <div className="held-list" data-tour-id="tour-not-on-board">
             <button
               type="button"
               className="held-toggle"

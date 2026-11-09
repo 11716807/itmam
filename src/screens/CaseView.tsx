@@ -447,6 +447,7 @@ export function CaseView(props: Props) {
               </div>
 
               {open || stage === "verified" || stage === "lost" ? (
+                <div data-tour-id="tour-assist">
                 <LoopAssistBar
                   assist={assist}
                   applyLabel={assistApply?.label}
@@ -486,6 +487,7 @@ export function CaseView(props: Props) {
                           : false
                   }
                 />
+                </div>
               ) : null}
 
               <ol className="action-progress">
